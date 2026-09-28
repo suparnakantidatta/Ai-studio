@@ -56,9 +56,6 @@ class MainActivity : ComponentActivity() {
                 },
                 onAdminLoginSuccess = {
                   currentScreen = AppScreen.AdminErp
-                },
-                onOpenServerConfig = {
-                  showServerConfigDialog = true
                 }
               )
             }

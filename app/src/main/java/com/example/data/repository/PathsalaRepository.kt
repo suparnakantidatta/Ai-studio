@@ -20,6 +20,7 @@ import com.example.data.model.OnlineExam
 import com.example.data.model.Student
 import com.example.data.model.StudentLoginRequest
 import com.example.data.model.StudyMaterial
+import com.example.data.sheet.GoogleSheetSyncService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -107,8 +108,30 @@ class PathsalaRepository(private val context: Context) {
   fun syncWithBackend() {
     scope.launch {
       _isSyncing.value = true
-      _connectionStatus.value = "Connecting to backend..."
+      _connectionStatus.value = "Syncing with Google Sheet..."
       var syncSuccess = false
+
+      // 1. Prioritize Live Google Sheet Database
+      try {
+        val sheetDto = GoogleSheetSyncService.fetchDatabaseFromSheet()
+        if (sheetDto != null) {
+          localStore.saveAll(sheetDto)
+          sheetDto.centerInfo?.let { _centerInfo.value = it }
+          sheetDto.students?.let { if (it.isNotEmpty()) _students.value = it }
+          sheetDto.courses?.let { if (it.isNotEmpty()) _courses.value = it }
+          sheetDto.batches?.let { if (it.isNotEmpty()) _batches.value = it }
+          sheetDto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
+          sheetDto.payments?.let { if (it.isNotEmpty()) _payments.value = it }
+          sheetDto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
+          sheetDto.adminAccounts?.firstOrNull()?.let { _currentAdmin.value = it }
+          syncSuccess = true
+          _connectionStatus.value = "Synced with Google Sheet"
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Google Sheet sync error: ${e.message}")
+      }
+
+      // 2. Also try Master Cloud API
       try {
         val response = ApiClient.getApi().loadAllDatabase()
         if (response.isSuccessful && response.body()?.success == true) {
@@ -116,25 +139,25 @@ class PathsalaRepository(private val context: Context) {
           if (dto != null) {
             localStore.saveAll(dto)
             dto.centerInfo?.let { _centerInfo.value = it }
-            dto.students?.let { _students.value = it }
-            dto.courses?.let { _courses.value = it }
-            dto.batches?.let { _batches.value = it }
-            dto.educators?.let { _educators.value = it }
-            dto.payments?.let { _payments.value = it }
-            dto.admissions?.let { _admissions.value = it }
-            dto.liveClasses?.let { _liveClasses.value = it }
-            dto.classRecordings?.let { _recordings.value = it }
-            dto.studyMaterials?.let { _studyMaterials.value = it }
-            dto.exams?.let { _exams.value = it }
-            dto.questions?.let { _questions.value = it }
-            dto.examSubmissions?.let { _submissions.value = it }
+            dto.students?.let { if (it.isNotEmpty()) _students.value = it }
+            dto.courses?.let { if (it.isNotEmpty()) _courses.value = it }
+            dto.batches?.let { if (it.isNotEmpty()) _batches.value = it }
+            dto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
+            dto.payments?.let { if (it.isNotEmpty()) _payments.value = it }
+            dto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
+            dto.liveClasses?.let { if (it.isNotEmpty()) _liveClasses.value = it }
+            dto.classRecordings?.let { if (it.isNotEmpty()) _recordings.value = it }
+            dto.studyMaterials?.let { if (it.isNotEmpty()) _studyMaterials.value = it }
+            dto.exams?.let { if (it.isNotEmpty()) _exams.value = it }
+            dto.questions?.let { if (it.isNotEmpty()) _questions.value = it }
+            dto.examSubmissions?.let { if (it.isNotEmpty()) _submissions.value = it }
             dto.adminAccounts?.firstOrNull()?.let { _currentAdmin.value = it }
           }
           syncSuccess = true
         }
       } catch (_: Exception) {}
 
-      // Attempt individual REST endpoints if full DB load was not available
+      // 3. Attempt individual REST endpoints if full DB load was not available
       if (!syncSuccess) {
         try {
           val centerRes = ApiClient.getApi().getCenterInfo()
@@ -173,7 +196,7 @@ class PathsalaRepository(private val context: Context) {
 
       val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
       _lastSyncTime.value = timeFormat.format(Date())
-      _connectionStatus.value = if (syncSuccess) "Synced with Cloud API" else "Local DB (Ready)"
+      _connectionStatus.value = if (syncSuccess) "Google Sheet Synced" else "Offline Cache Active"
       _isSyncing.value = false
     }
   }
@@ -496,6 +519,107 @@ class PathsalaRepository(private val context: Context) {
             action = "approveAdmission",
             payload = mapOf(
               "applicationId" to applicationId,
+              "student" to mapOf(
+                "id" to newStudent.id,
+                "rollNo" to newStudent.rollNo,
+                "name" to newStudent.name,
+                "mobile" to newStudent.mobile,
+                "aadhaarNo" to newStudent.aadhaarNo,
+                "courseId" to newStudent.courseId,
+                "batchId" to newStudent.batchId,
+                "status" to "active"
+              )
+            )
+          )
+        )
+      } catch (_: Exception) {}
+    }
+
+    return newStudent
+  }
+
+  // Direct Student Enrollment (same fields as Web ERP Add Student)
+  fun directEnrollStudent(
+    name: String,
+    mobile: String,
+    aadhaarNo: String,
+    email: String?,
+    guardianName: String,
+    guardianPhone: String,
+    address: String,
+    courseId: String,
+    batchId: String,
+    academicClass: String,
+    customFeeOverride: Double?,
+    collectFeeNow: Boolean,
+    feeAmount: Double,
+    paymentMode: String,
+    transactionRef: String
+  ): Student {
+    val currentYear = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
+    val randomRoll = (100..999).random()
+    val rollNo = "PP-$currentYear-$randomRoll"
+
+    val course = _courses.value.find { it.id == courseId }
+    val batch = _batches.value.find { it.id == batchId }
+
+    val newStudent = Student(
+      id = "stu-${System.currentTimeMillis()}",
+      rollNo = rollNo,
+      name = name.trim(),
+      studentClass = academicClass,
+      mode = batch?.mode ?: "offline",
+      mobile = mobile.trim(),
+      aadhaarNo = aadhaarNo.trim(),
+      email = email?.trim()?.ifBlank { null },
+      guardianName = guardianName.trim().ifBlank { "Parent" },
+      guardianPhone = guardianPhone.trim(),
+      address = address.trim(),
+      courseId = courseId,
+      batchId = batchId,
+      admissionDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+      admissionMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date()),
+      status = "active",
+      customMonthlyFeeOverride = customFeeOverride
+    )
+
+    val updatedStudents = listOf(newStudent) + _students.value
+    _students.value = updatedStudents
+    localStore.saveStudents(updatedStudents)
+
+    if (collectFeeNow && feeAmount > 0) {
+      val receipt = FeePayment(
+        id = "pay-${System.currentTimeMillis()}",
+        receiptNo = "REC/$currentYear/${(100..999).random()}",
+        studentId = newStudent.id,
+        studentName = newStudent.name,
+        studentAadhaar = newStudent.aadhaarNo,
+        studentMobile = newStudent.mobile,
+        courseTitle = course?.title ?: "Tuition Course",
+        batchName = batch?.name ?: "Batch",
+        month = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date()),
+        monthsCovered = listOf(SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())),
+        baseMonthlyFee = feeAmount,
+        totalBaseFee = feeAmount,
+        finalAmountPaid = feeAmount,
+        paymentMode = paymentMode,
+        transactionRef = transactionRef.ifBlank { "CASH-COUNTER" },
+        status = "approved",
+        paymentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+        approvedBy = "Admin Desk (Direct Enrollment)",
+        remarks = "Admission Fee & tuition collected during student onboarding"
+      )
+      val updatedPayments = listOf(receipt) + _payments.value
+      _payments.value = updatedPayments
+      localStore.savePayments(updatedPayments)
+    }
+
+    scope.launch {
+      try {
+        ApiClient.getApi().mutateRecord(
+          MutateRequest(
+            action = "addStudent",
+            payload = mapOf(
               "student" to mapOf(
                 "id" to newStudent.id,
                 "rollNo" to newStudent.rollNo,

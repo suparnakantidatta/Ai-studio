@@ -40,14 +40,12 @@ import kotlinx.coroutines.launch
 fun LoginScreen(
   repository: PathsalaRepository,
   onStudentLoginSuccess: () -> Unit,
-  onAdminLoginSuccess: () -> Unit,
-  onOpenServerConfig: () -> Unit = {}
+  onAdminLoginSuccess: () -> Unit
 ) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
 
   var selectedRole by remember { mutableStateOf<String>("student") } // "student" or "admin"
-  val isSyncing by repository.isSyncing.collectAsState()
 
   // Student inputs
   var studentMobile by remember { mutableStateOf("") }
@@ -56,8 +54,8 @@ fun LoginScreen(
   var studentError by remember { mutableStateOf<String?>(null) }
 
   // Admin inputs
-  var adminUsername by remember { mutableStateOf("admin") }
-  var adminPassword by remember { mutableStateOf("admin123") }
+  var adminUsername by remember { mutableStateOf("") }
+  var adminPassword by remember { mutableStateOf("") }
   var adminPasswordVisible by remember { mutableStateOf(false) }
   var adminLoading by remember { mutableStateOf(false) }
   var adminError by remember { mutableStateOf<String?>(null) }
@@ -234,7 +232,7 @@ fun LoginScreen(
               value = studentMobile,
               onValueChange = { if (it.length <= 10) studentMobile = it.filter { char -> char.isDigit() } },
               label = { Text("10-Digit Mobile Number") },
-              placeholder = { Text("e.g. 9876543210") },
+              placeholder = { Text("Enter registered mobile number") },
               leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = IndigoPrimary) },
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
               singleLine = true,
@@ -246,7 +244,7 @@ fun LoginScreen(
               value = studentAadhaar,
               onValueChange = { studentAadhaar = it },
               label = { Text("Aadhaar (12 digits / last 4) or Roll No") },
-              placeholder = { Text("e.g. 453289012345 or PP-2026-001") },
+              placeholder = { Text("Enter Aadhaar No or Roll No") },
               leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = IndigoPrimary) },
               singleLine = true,
               shape = RoundedCornerShape(14.dp),
@@ -288,37 +286,6 @@ fun LoginScreen(
               }
             }
 
-            // Quick Demo Student Credentials
-            Text(
-              text = "Quick Demo Credentials (Tap to fill):",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              color = SlateTextSecondary,
-              modifier = Modifier.padding(top = 4.dp)
-            )
-
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              SuggestionChip(
-                onClick = {
-                  studentMobile = "9876543210"
-                  studentAadhaar = "453289012345"
-                },
-                label = { Text("Rohan (Class 11)", fontSize = 11.sp) },
-                shape = RoundedCornerShape(10.dp)
-              )
-              SuggestionChip(
-                onClick = {
-                  studentMobile = "9832145678"
-                  studentAadhaar = "789012345678"
-                },
-                label = { Text("Priyanka (Class 12)", fontSize = 11.sp) },
-                shape = RoundedCornerShape(10.dp)
-              )
-            }
-
           } else {
             // ADMIN FORM
             Text(
@@ -354,7 +321,7 @@ fun LoginScreen(
               value = adminUsername,
               onValueChange = { adminUsername = it },
               label = { Text("Username or Email") },
-              placeholder = { Text("admin") },
+              placeholder = { Text("Enter username or email") },
               leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = IndigoPrimary) },
               singleLine = true,
               shape = RoundedCornerShape(14.dp),
@@ -365,7 +332,7 @@ fun LoginScreen(
               value = adminPassword,
               onValueChange = { adminPassword = it },
               label = { Text("Password") },
-              placeholder = { Text("admin123") },
+              placeholder = { Text("Enter password") },
               leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = IndigoPrimary) },
               trailingIcon = {
                 IconButton(onClick = { adminPasswordVisible = !adminPasswordVisible }) {
@@ -415,74 +382,20 @@ fun LoginScreen(
                 }
               }
             }
-
-            // Quick default admin fill helper
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "Default: admin / admin123",
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                color = SlateTextSecondary
-              )
-              TextButton(
-                onClick = {
-                  adminUsername = "admin"
-                  adminPassword = "admin123"
-                }
-              ) {
-                Text("Autofill", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-              }
-            }
           }
         }
       }
 
-      // Footer notice
+      // Footer branding
       Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(top = 4.dp),
+        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
       ) {
-        val connectionStatus by repository.connectionStatus.collectAsState()
-        Surface(
-          color = Color(0x221E293B),
-          shape = RoundedCornerShape(12.dp),
-          border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33D4AF37)),
-          modifier = Modifier.clickable { onOpenServerConfig() }
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(if (isSyncing) EmeraldSuccess else Color(0xFF10B981))
-            )
-            Text(
-              text = if (isSyncing) "Syncing..." else connectionStatus,
-              fontSize = 10.sp,
-              color = Color(0xFFCBD5E1),
-              fontWeight = FontWeight.Medium
-            )
-            Icon(
-              imageVector = Icons.Default.Settings,
-              contentDescription = "Server Settings",
-              tint = Color(0xFF94A3B8),
-              modifier = Modifier.size(12.dp)
-            )
-          }
-        }
         Text(
           text = "Pixel Pathsala • Coaching & ERP System",
           color = Color(0xFF94A3B8),
-          fontSize = 11.sp,
+          fontSize = 12.sp,
           fontWeight = FontWeight.Medium
         )
       }

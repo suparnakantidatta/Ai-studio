@@ -94,8 +94,22 @@ fun AdminSettingsDialog(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
           ) {
+            Text("Database Engine", fontSize = 11.sp, color = SlateTextSecondary)
+            Text("Google Sheets Cloud DB", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+          }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Text("Google Sheet ID", fontSize = 11.sp, color = SlateTextSecondary)
+            Text("1HVB5lNLyCIh...4_O4", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = SlateTextPrimary)
+          }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
             Text("Last Synced", fontSize = 11.sp, color = SlateTextSecondary)
-            Text(lastSyncTime ?: "Never", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateTextPrimary)
+            Text(lastSyncTime ?: "Just now", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SlateTextPrimary)
           }
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -104,6 +118,28 @@ fun AdminSettingsDialog(
             Text("Official UPI ID", fontSize = 11.sp, color = SlateTextSecondary)
             Text(centerInfo.upiId, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = IndigoPrimary)
           }
+        }
+
+        // Open in Google Sheets button
+        OutlinedButton(
+          onClick = {
+            val intent = android.content.Intent(
+              android.content.Intent.ACTION_VIEW,
+              android.net.Uri.parse("https://docs.google.com/spreadsheets/d/1HVB5lNLyCIh6Uw0KmSAvaUnlQjfJMroHzAKy1a-4_O4/edit")
+            )
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+              context.startActivity(intent)
+            } catch (e: Exception) {
+              Toast.makeText(context, "Cannot open browser", Toast.LENGTH_SHORT).show()
+            }
+          },
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp), tint = IndigoPrimary)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Open Google Sheet Dashboard", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
         }
 
         // Server URL input
