@@ -30,12 +30,6 @@ android {
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-    }
   }
 
   buildTypes {
@@ -44,15 +38,18 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       
-      // Fallback to debugConfig if release key isn't provided
+      // Fallback to standard built-in debug signing if release key file isn't found
       val releaseKeystore = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
       if (releaseKeystore.exists()) {
         signingConfig = signingConfigs.getByName("release")
       } else {
-        signingConfig = signingConfigs.getByName("debugConfig")
+        signingConfig = signingConfigs.getByName("debug")
       }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      // Use Android Gradle Plugin's built-in auto-generated debug keystore
+      signingConfig = signingConfigs.getByName("debug")
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
