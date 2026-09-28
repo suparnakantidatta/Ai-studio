@@ -1,0 +1,6 @@
+{
+  "name": "Pixel Pathsala",
+  "description": "Premier Coaching Institute for School Syllabus, Science & Math Tuition, Coding & DBMS Academy, Online Admissions and Student ERP Portal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
