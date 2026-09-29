@@ -91,6 +91,12 @@ object GoogleSheetSyncService {
     val educators = parseEducatorsTable(dataObj.optJSONArray("Educators"))
     val centerInfo = parseCenterOverviewTable(dataObj.optJSONArray("Center_Overview"))
     val adminAccounts = parseAdminsTable(dataObj.optJSONArray("Admin_Credentials"))
+    val liveClasses = parseLiveClassesTable(dataObj.optJSONArray("Live_Classes"))
+    val classRecordings = parseClassRecordingsTable(dataObj.optJSONArray("Class_Recordings"))
+    val studyMaterials = parseStudyMaterialsTable(dataObj.optJSONArray("Study_Materials"))
+    val exams = parseExamsTable(dataObj.optJSONArray("Exams"))
+    val questions = parseQuestionsTable(dataObj.optJSONArray("Question_Bank"))
+    val submissions = parseSubmissionsTable(dataObj.optJSONArray("Exam_Submissions"))
 
     return DatabaseDataDto(
       centerInfo = centerInfo,
@@ -100,7 +106,13 @@ object GoogleSheetSyncService {
       payments = payments,
       admissions = admissions,
       educators = educators,
-      adminAccounts = adminAccounts
+      adminAccounts = adminAccounts,
+      liveClasses = liveClasses,
+      classRecordings = classRecordings,
+      studyMaterials = studyMaterials,
+      exams = exams,
+      questions = questions,
+      examSubmissions = submissions
     )
   }
 
@@ -432,15 +444,336 @@ object GoogleSheetSyncService {
       parseAdminsTable(arr)
     } ?: emptyList()
 
+    val admissions = fetchCsvRows("Admissions", GIDS["Admissions"] ?: "120081180")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseAdmissionsTable(arr)
+    } ?: emptyList()
+
+    val liveClasses = fetchCsvRows("Live_Classes", GIDS["Live_Classes"] ?: "1629684060")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseLiveClassesTable(arr)
+    } ?: emptyList()
+
+    val recordings = fetchCsvRows("Class_Recordings", GIDS["Class_Recordings"] ?: "863738719")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseClassRecordingsTable(arr)
+    } ?: emptyList()
+
+    val studyMaterials = fetchCsvRows("Study_Materials", GIDS["Study_Materials"] ?: "161082531")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseStudyMaterialsTable(arr)
+    } ?: emptyList()
+
+    val exams = fetchCsvRows("Exams", GIDS["Exams"] ?: "1954552249")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseExamsTable(arr)
+    } ?: emptyList()
+
+    val questions = fetchCsvRows("Question_Bank", GIDS["Question_Bank"] ?: "1111711455")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseQuestionsTable(arr)
+    } ?: emptyList()
+
+    val submissions = fetchCsvRows("Exam_Submissions", GIDS["Exam_Submissions"] ?: "1708781557")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseSubmissionsTable(arr)
+    } ?: emptyList()
+
     return DatabaseDataDto(
       centerInfo = centerInfo,
       students = students,
       courses = courses,
       batches = batches,
       payments = payments,
+      admissions = admissions,
       educators = educators,
-      adminAccounts = admins
+      adminAccounts = admins,
+      liveClasses = liveClasses,
+      classRecordings = recordings,
+      studyMaterials = studyMaterials,
+      exams = exams,
+      questions = questions,
+      examSubmissions = submissions
     )
+  }
+
+  private fun parseLiveClassesTable(array: JSONArray?): List<LiveClassSession> {
+    val list = mutableListOf<LiveClassSession>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "live-$i" }
+      val title = optCell(row, 1)
+      if (title.isBlank()) continue
+      val academicClass = optCell(row, 2).ifBlank { "All Classes" }
+      val subject = optCell(row, 3).ifBlank { "General" }
+      val courseId = optCell(row, 4).ifBlank { "all" }
+      val batchId = optCell(row, 5).ifBlank { "all" }
+      val educator = optCell(row, 6).ifBlank { "Faculty Desk" }
+      val date = optCell(row, 7).ifBlank { "2026-09-29" }
+      val startTime = optCell(row, 8).ifBlank { "10:00 AM" }
+      val endTime = optCell(row, 9).ifBlank { "11:30 AM" }
+      val status = optCell(row, 10).ifBlank { "scheduled" }
+      val platform = optCell(row, 11).ifBlank { "google_meet" }
+      val meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" }
+      val recordingAvailable = optCell(row, 13).contains("yes", ignoreCase = true)
+
+      list.add(
+        LiveClassSession(
+          id = id,
+          title = title,
+          academicClass = academicClass,
+          targetClass = academicClass,
+          subject = subject,
+          courseId = courseId,
+          batchId = batchId,
+          educatorName = educator,
+          scheduledDate = date,
+          startTime = startTime,
+          endTime = endTime,
+          status = status,
+          platform = platform,
+          meetingUrl = meetingUrl,
+          isRecordingAvailable = recordingAvailable
+        )
+      )
+    }
+    return list
+  }
+
+  private fun parseClassRecordingsTable(array: JSONArray?): List<ClassRecording> {
+    val list = mutableListOf<ClassRecording>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "rec-$i" }
+      val title = optCell(row, 1)
+      if (title.isBlank()) continue
+      val academicClass = optCell(row, 2).ifBlank { "Class 10 (Secondary)" }
+      val subject = optCell(row, 3).ifBlank { "Computer Science" }
+      val topic = optCell(row, 4)
+      val chapter = optCell(row, 5)
+      val courseId = optCell(row, 6).ifBlank { "all" }
+      val batchId = optCell(row, 7).ifBlank { "all" }
+      val educator = optCell(row, 8).ifBlank { "Faculty Desk" }
+      val date = optCell(row, 9)
+      val duration = optCell(row, 10).toIntOrNull() ?: 60
+      val sourceType = optCell(row, 11).ifBlank { "youtube" }
+      val videoUrl = optCell(row, 12).ifBlank { "https://www.youtube.com" }
+      val notesPdf = optCell(row, 13).ifBlank { null }
+      val views = optCell(row, 14).toIntOrNull() ?: 15
+
+      list.add(
+        ClassRecording(
+          id = id,
+          title = title,
+          academicClass = academicClass,
+          targetClass = academicClass,
+          subject = subject,
+          topic = topic,
+          chapter = chapter,
+          courseId = courseId,
+          batchId = batchId,
+          educatorName = educator,
+          recordedDate = date,
+          durationMinutes = duration,
+          videoSourceType = sourceType,
+          videoUrl = videoUrl,
+          notesPdfUrl = notesPdf,
+          viewCount = views
+        )
+      )
+    }
+    return list
+  }
+
+  private fun parseStudyMaterialsTable(array: JSONArray?): List<StudyMaterial> {
+    val list = mutableListOf<StudyMaterial>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "mat-$i" }
+      val title = optCell(row, 1)
+      if (title.isBlank()) continue
+      val subject = optCell(row, 2).ifBlank { "General" }
+      val courseId = optCell(row, 3).ifBlank { "all" }
+      val batchId = optCell(row, 4).ifBlank { "all" }
+      val fileType = optCell(row, 5).ifBlank { "pdf" }
+      val fileName = optCell(row, 6).ifBlank { title }
+      val fileSize = optCell(row, 7).ifBlank { "Cloud File" }
+      val fileUrl = optCell(row, 8)
+      val uploadedBy = optCell(row, 9).ifBlank { "Faculty Desk" }
+      val uploadedDate = optCell(row, 10).ifBlank { "2026-09-29" }
+      val downloadCount = optCell(row, 11).toIntOrNull() ?: 0
+      val description = optCell(row, 12)
+
+      list.add(
+        StudyMaterial(
+          id = id,
+          title = title,
+          subject = subject,
+          courseId = courseId,
+          batchId = batchId,
+          fileType = fileType,
+          fileName = fileName,
+          fileSize = fileSize,
+          fileUrl = fileUrl,
+          uploadedBy = uploadedBy,
+          uploadedDate = uploadedDate,
+          downloadCount = downloadCount,
+          description = description
+        )
+      )
+    }
+    return list
+  }
+
+  private fun parseExamsTable(array: JSONArray?): List<OnlineExam> {
+    val list = mutableListOf<OnlineExam>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "exam-$i" }
+      val code = optCell(row, 1).ifBlank { "EX-$i" }
+      val title = optCell(row, 2)
+      if (title.isBlank()) continue
+      val courseId = optCell(row, 3).ifBlank { "all" }
+      val batchId = optCell(row, 4).ifBlank { "all" }
+      val academicClass = optCell(row, 5).ifBlank { "Class 10" }
+      val subject = optCell(row, 6).ifBlank { "General" }
+      val duration = optCell(row, 7).toIntOrNull() ?: 30
+      val totalMarks = optCell(row, 8).toIntOrNull() ?: 20
+      val passingMarks = optCell(row, 9).toIntOrNull() ?: 8
+      val passingPct = optCell(row, 10).toIntOrNull() ?: 40
+      val status = optCell(row, 11).ifBlank { "active" }
+      val mode = optCell(row, 12).ifBlank { "online" }
+      val scheduledDate = optCell(row, 13).ifBlank { "2026-09-29" }
+      val startTime = optCell(row, 14).ifBlank { "09:00 AM" }
+      val endTime = optCell(row, 15).ifBlank { "09:00 PM" }
+      val questionIdsStr = optCell(row, 17)
+      val questionIds = if (questionIdsStr.isNotBlank()) questionIdsStr.split(",").map { it.trim() } else emptyList()
+      val instructions = optCell(row, 18).ifBlank { "Read each question carefully." }
+      val isPublished = optCell(row, 19).isBlank() || optCell(row, 19).contains("yes", ignoreCase = true) || optCell(row, 19) == "true"
+
+      list.add(
+        OnlineExam(
+          id = id,
+          examCode = code,
+          title = title,
+          courseId = courseId,
+          batchId = batchId,
+          academicClass = academicClass,
+          subject = subject,
+          durationMinutes = duration,
+          totalMarks = totalMarks,
+          passingMarks = passingMarks,
+          passingPercentage = passingPct,
+          status = status,
+          mode = mode,
+          scheduledDate = scheduledDate,
+          startTime = startTime,
+          endTime = endTime,
+          questionIds = questionIds,
+          instructions = instructions,
+          isPublished = isPublished
+        )
+      )
+    }
+    return list
+  }
+
+  private fun parseQuestionsTable(array: JSONArray?): List<ExamQuestion> {
+    val list = mutableListOf<ExamQuestion>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "q-$i" }
+      val courseId = optCell(row, 1).ifBlank { "all" }
+      val academicClass = optCell(row, 2)
+      val subject = optCell(row, 3).ifBlank { "General" }
+      val topic = optCell(row, 4).ifBlank { "Fundamentals" }
+      val marks = optCell(row, 5).toIntOrNull() ?: 2
+      val difficulty = optCell(row, 6).ifBlank { "medium" }
+      val text = optCell(row, 7)
+      if (text.isBlank()) continue
+      val optA = optCell(row, 8)
+      val optB = optCell(row, 9)
+      val optC = optCell(row, 10)
+      val optD = optCell(row, 11)
+      val options = listOf(optA, optB, optC, optD).filter { it.isNotBlank() }
+      val correctIdx = optCell(row, 12).toIntOrNull() ?: 0
+      val codeSnippet = optCell(row, 13).ifBlank { null }
+      val explanation = optCell(row, 14).ifBlank { null }
+
+      list.add(
+        ExamQuestion(
+          id = id,
+          courseId = courseId,
+          academicClass = academicClass,
+          subject = subject,
+          topic = topic,
+          marks = marks,
+          difficulty = difficulty,
+          questionText = text,
+          options = options,
+          correctOptionIndex = correctIdx,
+          codeSnippet = codeSnippet,
+          explanation = explanation
+        )
+      )
+    }
+    return list
+  }
+
+  private fun parseSubmissionsTable(array: JSONArray?): List<ExamSubmission> {
+    val list = mutableListOf<ExamSubmission>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "sub-$i" }
+      val examId = optCell(row, 1)
+      val examTitle = optCell(row, 2)
+      val studentId = optCell(row, 3)
+      val studentName = optCell(row, 4)
+      val rollNo = optCell(row, 5)
+      val score = optCell(row, 9).toIntOrNull() ?: 0
+      val total = optCell(row, 10).toIntOrNull() ?: 20
+      val pct = optCell(row, 11).toIntOrNull() ?: 0
+      val passed = optCell(row, 12).contains("pass", ignoreCase = true)
+      val timeSpent = optCell(row, 13).toIntOrNull() ?: 0
+      val submittedAt = optCell(row, 14)
+
+      list.add(
+        ExamSubmission(
+          id = id,
+          examId = examId,
+          examTitle = examTitle,
+          studentId = studentId,
+          studentName = studentName,
+          studentRollNo = rollNo,
+          score = score,
+          totalMarks = total,
+          percentage = pct,
+          passed = passed,
+          timeSpentSeconds = timeSpent,
+          submittedAt = submittedAt
+        )
+      )
+    }
+    return list
   }
 
   private fun fetchCsvRows(name: String, gid: String): List<List<String>>? {
@@ -725,6 +1058,288 @@ object GoogleSheetSyncService {
       arr.put(rowArr)
     }
     tables.put("Admissions", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushLiveClassesTable(sessions: List<LiveClassSession>): Boolean {
+    val headers = listOf(
+      "Session ID", "Class Title", "Academic Class", "Subject", "Course ID",
+      "Batch ID", "Educator Name", "Date", "Start Time", "End Time",
+      "Status", "Platform", "Meeting Link / Room ID", "Recording Available", "Created At"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (s in sessions) {
+      rows.add(
+        listOf(
+          s.id,
+          s.title,
+          s.academicClass ?: s.targetClass ?: "All Classes",
+          s.subject,
+          s.courseId,
+          s.batchId,
+          s.educatorName,
+          s.scheduledDate,
+          s.startTime,
+          s.endTime,
+          s.status,
+          s.platform,
+          s.meetingUrl ?: "https://meet.google.com/new",
+          if (s.isRecordingAvailable) "Yes" else "No",
+          s.scheduledDate
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Live_Classes", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushRecordingsTable(recordings: List<ClassRecording>): Boolean {
+    val headers = listOf(
+      "Recording ID", "Title", "Academic Class", "Subject", "Topic",
+      "Chapter", "Course ID", "Batch ID", "Educator Name", "Recorded Date",
+      "Duration (Mins)", "Source Type", "Video URL", "Notes PDF URL", "View Count", "Created At"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (r in recordings) {
+      rows.add(
+        listOf(
+          r.id,
+          r.title,
+          r.academicClass ?: r.targetClass ?: "All Classes",
+          r.subject,
+          r.topic ?: "",
+          r.chapter ?: "",
+          r.courseId,
+          r.batchId,
+          r.educatorName,
+          r.recordedDate,
+          r.durationMinutes,
+          r.videoSourceType,
+          r.videoUrl,
+          r.notesPdfUrl ?: "",
+          r.viewCount,
+          r.recordedDate
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Class_Recordings", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushStudyMaterialsTable(materials: List<StudyMaterial>): Boolean {
+    val headers = listOf(
+      "Material ID", "Title", "Subject", "Course ID", "Batch ID",
+      "File Type", "File Name", "File Size", "File URL / Link", "Uploaded By",
+      "Uploaded Date", "Download Count", "Description"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (m in materials) {
+      rows.add(
+        listOf(
+          m.id,
+          m.title,
+          m.subject ?: "General",
+          m.courseId,
+          m.batchId,
+          m.fileType,
+          m.fileName,
+          m.fileSize ?: "Cloud File",
+          m.fileUrl,
+          m.uploadedBy,
+          m.uploadedDate,
+          m.downloadCount,
+          m.description ?: ""
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Study_Materials", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushExamsTable(exams: List<OnlineExam>): Boolean {
+    val headers = listOf(
+      "Exam ID", "Exam Code", "Title", "Course ID", "Batch ID",
+      "Academic Class", "Subject", "Duration (Mins)", "Total Marks", "Passing Marks",
+      "Passing %", "Status", "Mode", "Scheduled Date", "Start Time",
+      "End Time", "Question Count", "Question IDs", "Instructions", "Published", "Created At"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (e in exams) {
+      rows.add(
+        listOf(
+          e.id,
+          e.examCode,
+          e.title,
+          e.courseId,
+          e.batchId,
+          e.academicClass ?: "Class 10",
+          e.subject,
+          e.durationMinutes,
+          e.totalMarks,
+          e.passingMarks,
+          e.passingPercentage,
+          e.status,
+          e.mode,
+          e.scheduledDate,
+          e.startTime,
+          e.endTime,
+          e.questionIds.size,
+          e.questionIds.joinToString(","),
+          e.instructions ?: "Read each question carefully.",
+          if (e.isPublished) "Yes" else "No",
+          e.scheduledDate
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Exams", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushQuestionsTable(questions: List<ExamQuestion>): Boolean {
+    val headers = listOf(
+      "Question ID", "Course ID", "Academic Class", "Subject", "Topic",
+      "Marks", "Difficulty", "Question Text", "Option A", "Option B",
+      "Option C", "Option D", "Correct Option Index", "Code Snippet", "Explanation", "Created At"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (q in questions) {
+      val optA = q.options.getOrNull(0) ?: ""
+      val optB = q.options.getOrNull(1) ?: ""
+      val optC = q.options.getOrNull(2) ?: ""
+      val optD = q.options.getOrNull(3) ?: ""
+      rows.add(
+        listOf(
+          q.id,
+          q.courseId,
+          q.academicClass ?: "",
+          q.subject,
+          q.topic,
+          q.marks,
+          q.difficulty,
+          q.questionText,
+          optA,
+          optB,
+          optC,
+          optD,
+          q.correctOptionIndex,
+          q.codeSnippet ?: "",
+          q.explanation ?: "",
+          "2026-09-29"
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Question_Bank", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushExamSubmissionsTable(submissions: List<ExamSubmission>): Boolean {
+    val headers = listOf(
+      "Submission ID", "Exam ID", "Exam Title", "Student ID", "Student Name",
+      "Roll No", "Aadhaar No", "Course ID", "Batch ID", "Score Obtained",
+      "Total Marks", "Percentage (%)", "Result Status", "Time Spent (Secs)", "Submitted At", "Answers Summary"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (sub in submissions) {
+      rows.add(
+        listOf(
+          sub.id,
+          sub.examId,
+          sub.examTitle,
+          sub.studentId,
+          sub.studentName,
+          sub.studentRollNo ?: "",
+          "",
+          "",
+          "",
+          sub.score,
+          sub.totalMarks,
+          sub.percentage,
+          if (sub.passed) "PASSED" else "NEEDS_IMPROVEMENT",
+          sub.timeSpentSeconds,
+          sub.submittedAt,
+          ""
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Exam_Submissions", arr)
     json.put("tables", tables)
 
     return postToWebhook(json.toString())

@@ -123,6 +123,15 @@ class PathsalaRepository(private val context: Context) {
           if (_admissions.value.isNotEmpty()) {
             GoogleSheetSyncService.pushAdmissionsTable(_admissions.value)
           }
+          if (_liveClasses.value.isNotEmpty()) {
+            GoogleSheetSyncService.pushLiveClassesTable(_liveClasses.value)
+          }
+          if (_studyMaterials.value.isNotEmpty()) {
+            GoogleSheetSyncService.pushStudyMaterialsTable(_studyMaterials.value)
+          }
+          if (_exams.value.isNotEmpty()) {
+            GoogleSheetSyncService.pushExamsTable(_exams.value)
+          }
           _connectionStatus.value = "Changes Pushed to Google Sheet"
         } catch (e: Exception) {
           android.util.Log.e("PathsalaRepository", "Push to Google Sheet error: ${e.message}")
@@ -141,7 +150,19 @@ class PathsalaRepository(private val context: Context) {
           sheetDto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
           sheetDto.payments?.let { if (it.isNotEmpty()) _payments.value = it }
           sheetDto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
-          sheetDto.adminAccounts?.firstOrNull()?.let { _currentAdmin.value = it }
+          sheetDto.liveClasses?.let { if (it.isNotEmpty()) _liveClasses.value = it }
+          sheetDto.classRecordings?.let { if (it.isNotEmpty()) _recordings.value = it }
+          sheetDto.studyMaterials?.let { if (it.isNotEmpty()) _studyMaterials.value = it }
+          sheetDto.exams?.let { if (it.isNotEmpty()) _exams.value = it }
+          sheetDto.questions?.let { if (it.isNotEmpty()) _questions.value = it }
+          sheetDto.examSubmissions?.let { if (it.isNotEmpty()) _submissions.value = it }
+          // Save admin account locally, but DO NOT auto-login unless admin is already authenticated
+          sheetDto.adminAccounts?.firstOrNull()?.let {
+            localStore.saveAdminAccount(it)
+            if (_currentAdmin.value != null) {
+              _currentAdmin.value = it
+            }
+          }
           syncSuccess = true
           _connectionStatus.value = "Google Sheet Connected & Synced"
           _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
@@ -170,7 +191,12 @@ class PathsalaRepository(private val context: Context) {
             dto.exams?.let { if (it.isNotEmpty()) _exams.value = it }
             dto.questions?.let { if (it.isNotEmpty()) _questions.value = it }
             dto.examSubmissions?.let { if (it.isNotEmpty()) _submissions.value = it }
-            dto.adminAccounts?.firstOrNull()?.let { _currentAdmin.value = it }
+            dto.adminAccounts?.firstOrNull()?.let {
+              localStore.saveAdminAccount(it)
+              if (_currentAdmin.value != null) {
+                _currentAdmin.value = it
+              }
+            }
           }
           syncSuccess = true
         }
@@ -679,6 +705,12 @@ class PathsalaRepository(private val context: Context) {
         GoogleSheetSyncService.pushStudentsTable(_students.value)
         GoogleSheetSyncService.pushPaymentsTable(_payments.value)
         GoogleSheetSyncService.pushAdmissionsTable(_admissions.value)
+        GoogleSheetSyncService.pushLiveClassesTable(_liveClasses.value)
+        GoogleSheetSyncService.pushRecordingsTable(_recordings.value)
+        GoogleSheetSyncService.pushStudyMaterialsTable(_studyMaterials.value)
+        GoogleSheetSyncService.pushExamsTable(_exams.value)
+        GoogleSheetSyncService.pushQuestionsTable(_questions.value)
+        GoogleSheetSyncService.pushExamSubmissionsTable(_submissions.value)
         _connectionStatus.value = "Google Sheet Synced"
         _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
       } catch (e: Exception) {
@@ -695,31 +727,13 @@ class PathsalaRepository(private val context: Context) {
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
 
-    scope.launch {
+    scope.launch(Dispatchers.IO) {
       try {
-        ApiClient.getApi().mutateRecord(
-          MutateRequest(
-            action = "addLiveClass",
-            payload = mapOf(
-              "liveClass" to mapOf(
-                "id" to session.id,
-                "title" to session.title,
-                "academicClass" to session.academicClass,
-                "subject" to session.subject,
-                "courseId" to session.courseId,
-                "batchId" to session.batchId,
-                "educatorName" to session.educatorName,
-                "scheduledDate" to session.scheduledDate,
-                "startTime" to session.startTime,
-                "endTime" to session.endTime,
-                "status" to session.status,
-                "platform" to session.platform,
-                "meetingUrl" to session.meetingUrl
-              )
-            )
-          )
-        )
-      } catch (_: Exception) {}
+        GoogleSheetSyncService.pushLiveClassesTable(updated)
+        _connectionStatus.value = "Live Class Synced to Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync live class error: ${e.message}")
+      }
     }
   }
 
@@ -730,15 +744,114 @@ class PathsalaRepository(private val context: Context) {
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
 
-    scope.launch {
+    scope.launch(Dispatchers.IO) {
       try {
-        ApiClient.getApi().mutateRecord(
-          MutateRequest(
-            action = "setLiveClassStatus",
-            payload = mapOf("id" to sessionId, "status" to newStatus)
-          )
-        )
-      } catch (_: Exception) {}
+        GoogleSheetSyncService.pushLiveClassesTable(updated)
+        _connectionStatus.value = "Live Class Status Synced"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync live class status error: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteLiveClass(sessionId: String) {
+    val updated = _liveClasses.value.filter { it.id != sessionId }
+    _liveClasses.value = updated
+    localStore.saveLiveClasses(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushLiveClassesTable(updated)
+        _connectionStatus.value = "Live Class Deleted from Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Delete live class error: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteClassRecording(recordingId: String) {
+    val updated = _recordings.value.filter { it.id != recordingId }
+    _recordings.value = updated
+    localStore.saveRecordings(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushRecordingsTable(updated)
+        _connectionStatus.value = "Recording Deleted from Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Delete recording error: ${e.message}")
+      }
+    }
+  }
+
+  // Study Materials / Class Notes Management
+  fun addStudyMaterial(material: StudyMaterial) {
+    val updated = listOf(material) + _studyMaterials.value
+    _studyMaterials.value = updated
+    localStore.saveStudyMaterials(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushStudyMaterialsTable(updated)
+        _connectionStatus.value = "Study Note Synced to Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Add study material error: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteStudyMaterial(materialId: String) {
+    val updated = _studyMaterials.value.filter { it.id != materialId }
+    _studyMaterials.value = updated
+    localStore.saveStudyMaterials(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushStudyMaterialsTable(updated)
+        _connectionStatus.value = "Study Note Deleted from Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Delete study material error: ${e.message}")
+      }
+    }
+  }
+
+  // Online Exams Management
+  fun createOnlineExam(exam: OnlineExam, questionsList: List<ExamQuestion> = emptyList()) {
+    val updatedExams = listOf(exam) + _exams.value
+    _exams.value = updatedExams
+    localStore.saveExams(updatedExams)
+
+    if (questionsList.isNotEmpty()) {
+      val updatedQuestions = (questionsList + _questions.value).distinctBy { it.id }
+      _questions.value = updatedQuestions
+      localStore.saveQuestions(updatedQuestions)
+    }
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushExamsTable(updatedExams)
+        if (questionsList.isNotEmpty()) {
+          GoogleSheetSyncService.pushQuestionsTable(_questions.value)
+        }
+        _connectionStatus.value = "Exam Synced to Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Create exam error: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteOnlineExam(examId: String) {
+    val updated = _exams.value.filter { it.id != examId }
+    _exams.value = updated
+    localStore.saveExams(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushExamsTable(updated)
+        _connectionStatus.value = "Exam Deleted from Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Delete exam error: ${e.message}")
+      }
     }
   }
 
@@ -772,6 +885,15 @@ class PathsalaRepository(private val context: Context) {
     val updated = listOf(submission) + _submissions.value
     _submissions.value = updated
     localStore.saveExamSubmissions(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushExamSubmissionsTable(updated)
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Submit exam attempt error: ${e.message}")
+      }
+    }
+
     return submission
   }
 }

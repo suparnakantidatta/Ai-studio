@@ -25,6 +25,7 @@ fun AdminMainScreen(
 ) {
   val context = androidx.compose.ui.platform.LocalContext.current
   var selectedTab by remember { mutableStateOf(0) }
+  var academicSubTab by remember { mutableIntStateOf(0) }
   var showSettingsDialog by remember { mutableStateOf(false) }
 
   val payments by repository.payments.collectAsState()
@@ -152,7 +153,10 @@ fun AdminMainScreen(
 
         NavigationBarItem(
           selected = selectedTab == 3,
-          onClick = { selectedTab = 3 },
+          onClick = {
+            academicSubTab = 0
+            selectedTab = 3
+          },
           icon = {
             BadgedBox(
               badge = {
@@ -163,10 +167,10 @@ fun AdminMainScreen(
                 }
               }
             ) {
-              Icon(Icons.Default.Radio, contentDescription = "Live Class")
+              Icon(Icons.Default.School, contentDescription = "Academics")
             }
           },
-          label = { Text("Live Classes", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+          label = { Text("Academics", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
           colors = NavigationBarItemDefaults.colors(
             selectedIconColor = if (hasLiveClass) Color(0xFFE11D48) else IndigoPrimary,
             selectedTextColor = if (hasLiveClass) Color(0xFFE11D48) else IndigoPrimary,
@@ -199,12 +203,26 @@ fun AdminMainScreen(
           repository = repository,
           onNavigateToApprovals = { selectedTab = 1 },
           onNavigateToStudents = { selectedTab = 2 },
-          onNavigateToLive = { selectedTab = 3 },
+          onNavigateToLive = {
+            academicSubTab = 0
+            selectedTab = 3
+          },
+          onNavigateToExams = {
+            academicSubTab = 1
+            selectedTab = 3
+          },
+          onNavigateToNotes = {
+            academicSubTab = 2
+            selectedTab = 3
+          },
           onNavigateToFees = { selectedTab = 4 }
         )
         1 -> AdminApprovalsTab(repository = repository)
         2 -> AdminStudentsTab(repository = repository)
-        3 -> AdminLiveClassTab(repository = repository)
+        3 -> AdminLiveClassTab(
+          repository = repository,
+          initialSubTab = academicSubTab
+        )
         4 -> AdminFeeCollectionTab(repository = repository)
       }
     }

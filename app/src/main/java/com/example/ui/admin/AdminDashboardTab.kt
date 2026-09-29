@@ -34,7 +34,9 @@ fun AdminDashboardTab(
   onNavigateToApprovals: () -> Unit,
   onNavigateToFees: () -> Unit,
   onNavigateToLive: () -> Unit,
-  onNavigateToStudents: () -> Unit
+  onNavigateToStudents: () -> Unit,
+  onNavigateToExams: () -> Unit = {},
+  onNavigateToNotes: () -> Unit = {}
 ) {
   val students by repository.students.collectAsState()
   val payments by repository.payments.collectAsState()
@@ -215,28 +217,53 @@ fun AdminDashboardTab(
     }
 
     item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        QuickActionButton(
-          label = "Collect Fee",
-          icon = Icons.Default.AddCard,
-          onClick = onNavigateToFees,
-          modifier = Modifier.weight(1f)
-        )
-        QuickActionButton(
-          label = "Add Student",
-          icon = Icons.Default.PersonAdd,
-          onClick = onNavigateToStudents,
-          modifier = Modifier.weight(1f)
-        )
-        QuickActionButton(
-          label = "Live Class",
-          icon = Icons.Default.VideoCall,
-          onClick = onNavigateToLive,
-          modifier = Modifier.weight(1f)
-        )
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          QuickActionButton(
+            label = "Collect Fee",
+            icon = Icons.Default.AddCard,
+            onClick = onNavigateToFees,
+            modifier = Modifier.weight(1f)
+          )
+          QuickActionButton(
+            label = "Add Student",
+            icon = Icons.Default.PersonAdd,
+            onClick = onNavigateToStudents,
+            modifier = Modifier.weight(1f)
+          )
+          QuickActionButton(
+            label = "Live Class",
+            icon = Icons.Default.VideoCall,
+            onClick = onNavigateToLive,
+            modifier = Modifier.weight(1f)
+          )
+        }
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          QuickActionButton(
+            label = "Online Exams",
+            icon = Icons.Default.Assignment,
+            onClick = onNavigateToExams,
+            modifier = Modifier.weight(1f)
+          )
+          QuickActionButton(
+            label = "Class Notes",
+            icon = Icons.Default.Folder,
+            onClick = onNavigateToNotes,
+            modifier = Modifier.weight(1f)
+          )
+          QuickActionButton(
+            label = "Approvals",
+            icon = Icons.Default.PendingActions,
+            onClick = onNavigateToApprovals,
+            modifier = Modifier.weight(1f)
+          )
+        }
       }
     }
 

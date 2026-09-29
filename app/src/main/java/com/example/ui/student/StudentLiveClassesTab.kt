@@ -45,12 +45,18 @@ fun StudentLiveClassesTab(
 
   var selectedView by remember { mutableStateOf("live") } // "live" or "recordings"
 
-  // Filter for student's batch or all-batch sessions
-  val studentLive = liveClasses.filter { it.batchId == "all" || it.batchId == student.batchId }
+  // Filter for student's batch, course or all-batch sessions
+  val studentLive = liveClasses.filter {
+    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
+    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  }
   val activeLive = studentLive.filter { it.status == "live" }
   val upcomingLive = studentLive.filter { it.status == "scheduled" }
 
-  val studentRecordings = recordings.filter { it.batchId == "all" || it.batchId == student.batchId }
+  val studentRecordings = recordings.filter {
+    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
+    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),

@@ -40,8 +40,11 @@ fun StudentMaterialsTab(
 
   val studentBatch = batches.find { it.id == student.batchId }
 
-  // Filter materials for this student's batch or all-batch materials
-  val studentMaterials = materials.filter { it.batchId == "all" || it.batchId == student.batchId }
+  // Filter materials for this student's course or batch or all-batch materials
+  val studentMaterials = materials.filter {
+    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
+    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
