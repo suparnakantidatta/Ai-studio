@@ -120,6 +120,21 @@ fun AdminSettingsDialog(
           }
         }
 
+        // Sync Actions to Google Sheets
+        Button(
+          onClick = {
+            repository.forceSyncAllToGoogleSheets()
+            Toast.makeText(context, "Pushing all local records to Google Sheet...", Toast.LENGTH_SHORT).show()
+          },
+          shape = RoundedCornerShape(12.dp),
+          colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Push All Changes to Google Sheet DB", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+
         // Open in Google Sheets button
         OutlinedButton(
           onClick = {

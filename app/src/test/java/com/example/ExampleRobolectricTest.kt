@@ -70,4 +70,10 @@ class ExampleRobolectricTest {
     assertEquals("pending", payment.status)
     assertEquals(initialPaymentCount + 1, repository.payments.value.size)
   }
+
+  @Test
+  fun `test webhook post directly`() {
+    val success = com.example.data.sheet.GoogleSheetSyncService.postToWebhook("{\"action\":\"ping\"}")
+    assertTrue(success)
+  }
 }

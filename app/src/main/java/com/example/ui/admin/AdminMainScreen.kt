@@ -23,6 +23,7 @@ fun AdminMainScreen(
   repository: PathsalaRepository,
   onLogout: () -> Unit
 ) {
+  val context = androidx.compose.ui.platform.LocalContext.current
   var selectedTab by remember { mutableStateOf(0) }
   var showSettingsDialog by remember { mutableStateOf(false) }
 
@@ -62,7 +63,10 @@ fun AdminMainScreen(
         },
         actions = {
           IconButton(
-            onClick = { repository.syncWithBackend() },
+            onClick = {
+              android.widget.Toast.makeText(context, "Syncing changes to Google Sheets...", android.widget.Toast.LENGTH_SHORT).show()
+              repository.syncWithBackend(pushFirst = true)
+            },
             enabled = !isSyncing
           ) {
             Icon(

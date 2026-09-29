@@ -248,8 +248,8 @@ fun AdminStudentsTab(
               TextButton(
                 onClick = {
                   val newStatus = if (student.status == "active") "passed_out" else "active"
-                  // update status
-                  Toast.makeText(context, "Student status updated", Toast.LENGTH_SHORT).show()
+                  repository.updateStudentStatus(student.id, newStatus)
+                  Toast.makeText(context, "${student.name} marked as $newStatus & synced to Google Sheet", Toast.LENGTH_SHORT).show()
                 }
               ) {
                 Text(
@@ -262,8 +262,8 @@ fun AdminStudentsTab(
 
               IconButton(
                 onClick = {
-                  // delete confirmation
-                  Toast.makeText(context, "Deleting student...", Toast.LENGTH_SHORT).show()
+                  repository.deleteStudent(student.id)
+                  Toast.makeText(context, "Student deleted and removed from Google Sheet", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.size(32.dp)
               ) {

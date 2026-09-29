@@ -95,21 +95,39 @@ class PathsalaRepository(private val context: Context) {
   init {
     ApiClient.init(context)
     _serverUrl.value = ApiClient.getBaseUrl()
-    // Auto sync with backend on initialization
-    syncWithBackend()
+    // Initial fetch from remote
+    syncWithBackend(pushFirst = false)
   }
 
   fun setServerUrl(newUrl: String) {
     ApiClient.setBaseUrl(newUrl, context)
     _serverUrl.value = ApiClient.getBaseUrl()
-    syncWithBackend()
+    syncWithBackend(pushFirst = true)
   }
 
-  fun syncWithBackend() {
-    scope.launch {
+  fun syncWithBackend(pushFirst: Boolean = true) {
+    scope.launch(Dispatchers.IO) {
       _isSyncing.value = true
-      _connectionStatus.value = "Syncing with Google Sheet..."
+      _connectionStatus.value = if (pushFirst) "Pushing to Google Sheet..." else "Syncing with Google Sheet..."
       var syncSuccess = false
+
+      if (pushFirst) {
+        try {
+          android.util.Log.d("PathsalaRepository", "Pushing local data to Google Sheet...")
+          if (_students.value.isNotEmpty()) {
+            GoogleSheetSyncService.pushStudentsTable(_students.value)
+          }
+          if (_payments.value.isNotEmpty()) {
+            GoogleSheetSyncService.pushPaymentsTable(_payments.value)
+          }
+          if (_admissions.value.isNotEmpty()) {
+            GoogleSheetSyncService.pushAdmissionsTable(_admissions.value)
+          }
+          _connectionStatus.value = "Changes Pushed to Google Sheet"
+        } catch (e: Exception) {
+          android.util.Log.e("PathsalaRepository", "Push to Google Sheet error: ${e.message}")
+        }
+      }
 
       // 1. Prioritize Live Google Sheet Database
       try {
@@ -125,7 +143,8 @@ class PathsalaRepository(private val context: Context) {
           sheetDto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
           sheetDto.adminAccounts?.firstOrNull()?.let { _currentAdmin.value = it }
           syncSuccess = true
-          _connectionStatus.value = "Synced with Google Sheet"
+          _connectionStatus.value = "Google Sheet Connected & Synced"
+          _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
         }
       } catch (e: Exception) {
         android.util.Log.e("PathsalaRepository", "Google Sheet sync error: ${e.message}")
@@ -357,41 +376,15 @@ class PathsalaRepository(private val context: Context) {
     _payments.value = updatedList
     localStore.savePayments(updatedList)
 
-    // Notify backend via OpenAPI and mutate endpoints
-    scope.launch {
+    // Push new fee payment directly to Google Sheet Cloud DB
+    scope.launch(Dispatchers.IO) {
       try {
-        ApiClient.getApi().payFee(
-          com.example.data.model.PayFeeRequest(
-            studentId = student.id,
-            amount = amount,
-            month = months.joinToString(", "),
-            paymentMode = mode,
-            transactionRef = ref.ifBlank { "UPI-APP-TRANSFER" }
-          )
-        )
-      } catch (_: Exception) {}
-
-      try {
-        ApiClient.getApi().mutateRecord(
-          MutateRequest(
-            action = "newFeePayment",
-            payload = mapOf(
-              "payment" to mapOf(
-                "id" to newPayment.id,
-                "receiptNo" to newPayment.receiptNo,
-                "studentId" to newPayment.studentId,
-                "studentName" to newPayment.studentName,
-                "finalAmountPaid" to newPayment.finalAmountPaid,
-                "paymentMode" to newPayment.paymentMode,
-                "monthsCovered" to newPayment.monthsCovered,
-                "transactionRef" to newPayment.transactionRef,
-                "status" to "pending",
-                "paymentDate" to newPayment.paymentDate
-              )
-            )
-          )
-        )
-      } catch (_: Exception) {}
+        GoogleSheetSyncService.pushPaymentsTable(updatedList)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync fee to Google Sheet error: ${e.message}")
+      }
     }
 
     return newPayment
@@ -420,15 +413,14 @@ class PathsalaRepository(private val context: Context) {
     _payments.value = updated
     localStore.savePayments(updated)
 
-    scope.launch {
+    scope.launch(Dispatchers.IO) {
       try {
-        ApiClient.getApi().mutateRecord(
-          MutateRequest(
-            action = "approvePayment",
-            payload = mapOf("paymentId" to paymentId)
-          )
-        )
-      } catch (_: Exception) {}
+        GoogleSheetSyncService.pushPaymentsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync payment approval error: ${e.message}")
+      }
     }
   }
 
@@ -438,6 +430,15 @@ class PathsalaRepository(private val context: Context) {
     }
     _payments.value = updated
     localStore.savePayments(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushPaymentsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync payment rejection error: ${e.message}")
+      }
+    }
   }
 
   // Admin approval of admission
@@ -512,27 +513,18 @@ class PathsalaRepository(private val context: Context) {
       localStore.savePayments(updatedPayments)
     }
 
-    scope.launch {
+    scope.launch(Dispatchers.IO) {
       try {
-        ApiClient.getApi().mutateRecord(
-          MutateRequest(
-            action = "approveAdmission",
-            payload = mapOf(
-              "applicationId" to applicationId,
-              "student" to mapOf(
-                "id" to newStudent.id,
-                "rollNo" to newStudent.rollNo,
-                "name" to newStudent.name,
-                "mobile" to newStudent.mobile,
-                "aadhaarNo" to newStudent.aadhaarNo,
-                "courseId" to newStudent.courseId,
-                "batchId" to newStudent.batchId,
-                "status" to "active"
-              )
-            )
-          )
-        )
-      } catch (_: Exception) {}
+        GoogleSheetSyncService.pushStudentsTable(_students.value)
+        GoogleSheetSyncService.pushAdmissionsTable(updatedAdmissions)
+        if (isFeePaid && feeAmount > 0) {
+          GoogleSheetSyncService.pushPaymentsTable(_payments.value)
+        }
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync admission approval error: ${e.message}")
+      }
     }
 
     return newStudent
@@ -614,26 +606,17 @@ class PathsalaRepository(private val context: Context) {
       localStore.savePayments(updatedPayments)
     }
 
-    scope.launch {
+    scope.launch(Dispatchers.IO) {
       try {
-        ApiClient.getApi().mutateRecord(
-          MutateRequest(
-            action = "addStudent",
-            payload = mapOf(
-              "student" to mapOf(
-                "id" to newStudent.id,
-                "rollNo" to newStudent.rollNo,
-                "name" to newStudent.name,
-                "mobile" to newStudent.mobile,
-                "aadhaarNo" to newStudent.aadhaarNo,
-                "courseId" to newStudent.courseId,
-                "batchId" to newStudent.batchId,
-                "status" to "active"
-              )
-            )
-          )
-        )
-      } catch (_: Exception) {}
+        GoogleSheetSyncService.pushStudentsTable(_students.value)
+        if (collectFeeNow && feeAmount > 0) {
+          GoogleSheetSyncService.pushPaymentsTable(_payments.value)
+        }
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync direct student enrollment error: ${e.message}")
+      }
     }
 
     return newStudent
@@ -645,6 +628,65 @@ class PathsalaRepository(private val context: Context) {
     }
     _admissions.value = updated
     localStore.saveAdmissions(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushAdmissionsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync admission rejection error: ${e.message}")
+      }
+    }
+  }
+
+  fun updateStudentStatus(studentId: String, newStatus: String) {
+    val updated = _students.value.map { s ->
+      if (s.id == studentId) s.copy(status = newStatus) else s
+    }
+    _students.value = updated
+    localStore.saveStudents(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushStudentsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync student status error: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteStudent(studentId: String) {
+    val updated = _students.value.filter { it.id != studentId }
+    _students.value = updated
+    localStore.saveStudents(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushStudentsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync student deletion error: ${e.message}")
+      }
+    }
+  }
+
+  fun forceSyncAllToGoogleSheets() {
+    scope.launch(Dispatchers.IO) {
+      _isSyncing.value = true
+      _connectionStatus.value = "Syncing to Google Sheets..."
+      try {
+        GoogleSheetSyncService.pushStudentsTable(_students.value)
+        GoogleSheetSyncService.pushPaymentsTable(_payments.value)
+        GoogleSheetSyncService.pushAdmissionsTable(_admissions.value)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        _connectionStatus.value = "Sync Error: ${e.message}"
+      } finally {
+        _isSyncing.value = false
+      }
+    }
   }
 
   // Live class management

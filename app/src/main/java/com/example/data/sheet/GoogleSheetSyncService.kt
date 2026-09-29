@@ -2,8 +2,10 @@ package com.example.data.sheet
 
 import android.util.Log
 import com.example.data.model.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -34,8 +36,9 @@ object GoogleSheetSyncService {
   )
 
   private val client = OkHttpClient.Builder()
-    .connectTimeout(20, TimeUnit.SECONDS)
-    .readTimeout(25, TimeUnit.SECONDS)
+    .connectTimeout(30, TimeUnit.SECONDS)
+    .readTimeout(45, TimeUnit.SECONDS)
+    .writeTimeout(45, TimeUnit.SECONDS)
     .followRedirects(true)
     .followSslRedirects(true)
     .build()
@@ -483,5 +486,247 @@ object GoogleSheetSyncService {
     if (index >= row.length()) return ""
     val item = row.opt(index) ?: return ""
     return item.toString().trim()
+  }
+
+  // ==========================================
+  // WRITE OPERATIONS TO GOOGLE SHEETS
+  // ==========================================
+
+  fun postToWebhook(jsonPayload: String): Boolean {
+    return try {
+      val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+      val body = jsonPayload.toRequestBody(mediaType)
+      val request = Request.Builder()
+        .url(WEBHOOK_URL)
+        .header("User-Agent", "Mozilla/5.0 PixelPathsala/1.0")
+        .post(body)
+        .build()
+
+      val response = client.newCall(request).execute()
+      val resString = response.body?.string() ?: ""
+      println("DEBUG postToWebhook code: ${response.code}, body: $resString")
+      Log.d(TAG, "postToWebhook response code: ${response.code}, body: $resString")
+      response.isSuccessful || resString.contains("\"success\":true")
+    } catch (e: Exception) {
+      println("DEBUG postToWebhook exception: ${e.message}")
+      e.printStackTrace()
+      Log.e(TAG, "postToWebhook failed: ${e.message}", e)
+      false
+    }
+  }
+
+  fun appendStudent(student: Student): Boolean {
+    val row = listOf(
+      student.id,
+      student.rollNo,
+      student.name,
+      student.mobile,
+      student.aadhaarNo,
+      student.email ?: "",
+      student.guardianName,
+      student.guardianPhone,
+      student.address,
+      student.courseId,
+      student.batchId,
+      student.admissionDate,
+      student.status,
+      student.customMonthlyFeeOverride?.toString() ?: "",
+      "",
+      "",
+      ""
+    )
+    val json = JSONObject()
+    json.put("action", "addStudent")
+    val rowArr = JSONArray()
+    row.forEach { rowArr.put(it) }
+    json.put("row", rowArr)
+    return postToWebhook(json.toString())
+  }
+
+  fun appendPayment(payment: FeePayment): Boolean {
+    val row = listOf(
+      payment.receiptNo,
+      payment.id,
+      payment.studentId,
+      payment.studentName,
+      payment.finalAmountPaid,
+      payment.paymentMode,
+      payment.monthsCovered.joinToString(","),
+      payment.transactionRef,
+      payment.paymentDate,
+      payment.status,
+      payment.approvedBy,
+      payment.remarks ?: payment.rejectionReason ?: ""
+    )
+    val json = JSONObject()
+    json.put("action", "addPayment")
+    val rowArr = JSONArray()
+    row.forEach { rowArr.put(it) }
+    json.put("row", rowArr)
+    return postToWebhook(json.toString())
+  }
+
+  fun appendAdmission(app: AdmissionApplication): Boolean {
+    val row = listOf(
+      app.id,
+      app.studentName,
+      app.mobile,
+      app.aadhaarNo,
+      app.email ?: "",
+      app.guardianName,
+      app.guardianPhone,
+      app.targetCourseId,
+      app.status,
+      app.appliedDate,
+      app.initialPaymentStatus,
+      app.initialPaymentMode ?: "CASH",
+      app.initialPaymentRef ?: "",
+      app.remarks ?: "",
+      app.rejectionReason ?: "",
+      app.address
+    )
+    val json = JSONObject()
+    json.put("action", "addAdmission")
+    val rowArr = JSONArray()
+    row.forEach { rowArr.put(it) }
+    json.put("row", rowArr)
+    return postToWebhook(json.toString())
+  }
+
+  fun pushStudentsTable(students: List<Student>): Boolean {
+    val headers = listOf(
+      "Student ID", "Roll No", "Full Name", "Mobile Number", "Aadhaar No", "Email",
+      "Guardian Name", "Guardian Phone", "Residential Address", "Course ID", "Batch ID",
+      "Admission Date", "Status", "Custom Fee Override (₹)", "Monthly Base Fee (₹)",
+      "Total Paid (₹)", "Outstanding Due (₹)"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (s in students) {
+      rows.add(
+        listOf(
+          s.id,
+          s.rollNo,
+          s.name,
+          s.mobile,
+          s.aadhaarNo,
+          s.email ?: "",
+          s.guardianName,
+          s.guardianPhone,
+          s.address,
+          s.courseId,
+          s.batchId,
+          s.admissionDate,
+          s.status,
+          s.customMonthlyFeeOverride?.toString() ?: "",
+          "",
+          "",
+          ""
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Students", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushPaymentsTable(payments: List<FeePayment>): Boolean {
+    val headers = listOf(
+      "Receipt No", "Payment ID", "Student ID", "Student Name", "Amount Paid (₹)",
+      "Payment Mode", "Months Covered", "Transaction Ref / UPI", "Payment Date",
+      "Approval Status", "Approved By", "Rejection Reason"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (p in payments) {
+      rows.add(
+        listOf(
+          p.receiptNo,
+          p.id,
+          p.studentId,
+          p.studentName,
+          p.finalAmountPaid,
+          p.paymentMode,
+          p.monthsCovered.joinToString(","),
+          p.transactionRef,
+          p.paymentDate,
+          p.status,
+          p.approvedBy,
+          p.remarks ?: p.rejectionReason ?: ""
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Fee_Transactions", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
+
+  fun pushAdmissionsTable(admissions: List<AdmissionApplication>): Boolean {
+    val headers = listOf(
+      "Application ID", "Student Name", "Mobile Number", "Aadhaar No", "Email",
+      "Guardian Name", "Guardian Phone", "Target Course ID", "Status", "Applied Date",
+      "Initial Fee Status", "Payment Mode", "Transaction Ref / UPI", "Staff Remarks",
+      "Rejection Reason", "Address"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (a in admissions) {
+      rows.add(
+        listOf(
+          a.id,
+          a.studentName,
+          a.mobile,
+          a.aadhaarNo,
+          a.email ?: "",
+          a.guardianName,
+          a.guardianPhone,
+          a.targetCourseId,
+          a.status,
+          a.appliedDate,
+          a.initialPaymentStatus,
+          a.initialPaymentMode ?: "CASH",
+          a.initialPaymentRef ?: "",
+          a.remarks ?: "",
+          a.rejectionReason ?: "",
+          a.address
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Admissions", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
   }
 }
