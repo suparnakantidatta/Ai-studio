@@ -373,6 +373,9 @@ class PathsalaRepository(private val context: Context) {
     val paymentId = "pay-${System.currentTimeMillis()}"
     val receiptNo = "PENDING-REC-$currentYear$monthNumber-${(100..999).random()}"
 
+    val batch = _batches.value.find { it.id == student.batchId }
+    val course = _courses.value.find { it.id == student.courseId } ?: _courses.value.find { it.id == batch?.courseId }
+
     val newPayment = FeePayment(
       id = paymentId,
       receiptNo = receiptNo,
@@ -380,8 +383,8 @@ class PathsalaRepository(private val context: Context) {
       studentName = student.name,
       studentAadhaar = student.aadhaarNo,
       studentMobile = student.mobile,
-      courseTitle = _courses.value.find { it.id == student.courseId }?.title ?: "Enrolled Course",
-      batchName = _batches.value.find { it.id == student.batchId }?.name ?: "Batch",
+      courseTitle = course?.title ?: "Enrolled Course",
+      batchName = batch?.name ?: "Batch",
       month = months.joinToString(", "),
       monthsCovered = months,
       baseMonthlyFee = amount,

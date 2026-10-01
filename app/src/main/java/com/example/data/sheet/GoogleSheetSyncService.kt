@@ -134,8 +134,9 @@ object GoogleSheetSyncService {
       val address = optCell(row, 8)
       val courseId = optCell(row, 9)
       val batchId = optCell(row, 10)
-      val admissionDate = optCell(row, 11).take(10)
+      val admissionDate = optCell(row, 11).take(10).ifBlank { "2026-08-01" }
       val status = optCell(row, 12).ifBlank { "active" }
+      val customFee = optCell(row, 13).replace("₹", "").replace(",", "").trim().toDoubleOrNull()
 
       list.add(
         Student(
@@ -151,7 +152,8 @@ object GoogleSheetSyncService {
           courseId = courseId,
           batchId = batchId,
           admissionDate = admissionDate,
-          status = status
+          status = status,
+          customMonthlyFeeOverride = customFee
         )
       )
     }

@@ -38,6 +38,7 @@ import com.example.ui.components.ReceiptDialog
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
 import java.net.URLEncoder
 
 @Composable
@@ -54,35 +55,22 @@ fun StudentDashboardTab(
   val studentCourse = courses.find { it.id == student.courseId }
   val studentBatch = batches.find { it.id == student.batchId }
 
-  // Filter student payments
-  val studentPayments = payments.filter { it.studentId == student.id }
+  // Dynamic fee calculation as per batch & course, admission date, and website-adjusted payments
+  val feeSummary = remember(student, courses, batches, payments) {
+    FeeCalculator.calculateStudentFeeSummary(student, courses, batches, payments)
+  }
+
+  val monthlyFee = feeSummary.monthlyFee
+  val totalPaid = feeSummary.totalPaid
+  val totalDue = feeSummary.dueAmount
+  val advanceAmount = feeSummary.advanceAmount
+  val monthsElapsed = feeSummary.monthsElapsed
+  val unpaidMonths = feeSummary.unpaidMonths
+  val studentPayments = feeSummary.payments
   val approvedPayments = studentPayments.filter { it.status == "approved" }
-  val pendingPayments = studentPayments.filter { it.status == "pending" }
-
-  val totalPaid = approvedPayments.sumOf { it.finalAmountPaid }
-  val monthlyFee = student.customMonthlyFeeOverride ?: (studentCourse?.monthlyFee ?: 1200.0)
-
-  // Standard session months for tracking: April 2026 to August 2026
-  val sessionMonths = listOf(
-    Pair("2026-04", "April 2026"),
-    Pair("2026-05", "May 2026"),
-    Pair("2026-06", "June 2026"),
-    Pair("2026-07", "July 2026"),
-    Pair("2026-08", "August 2026")
-  )
-
-  // Compute month status
-  val paidMonthsSet = approvedPayments.flatMap { it.monthsCovered }.toSet()
-  val pendingMonthsSet = pendingPayments.flatMap { it.monthsCovered }.toSet()
 
   var showPaymentDialog by remember { mutableStateOf(false) }
   var selectedReceipt by remember { mutableStateOf<FeePayment?>(null) }
-
-  val unpaidMonths = sessionMonths.filter { (key, _) ->
-    !paidMonthsSet.contains(key) && !pendingMonthsSet.contains(key)
-  }
-
-  val totalDue = unpaidMonths.size * monthlyFee
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -183,7 +171,11 @@ fun StudentDashboardTab(
         MetricCard(
           title = "Pending Due",
           value = if (totalDue > 0) "₹${totalDue.toInt()}" else "₹0",
-          subtitle = if (totalDue > 0) "${unpaidMonths.size} Months Due" else "All Cleared",
+          subtitle = when {
+            totalDue > 0 -> "${unpaidMonths.size} Months Due"
+            advanceAmount > 0 -> "Advance: ₹${advanceAmount.toInt()}"
+            else -> "All Cleared"
+          },
           icon = if (totalDue > 0) Icons.Default.Warning else Icons.Default.Verified,
           iconTint = if (totalDue > 0) Color(0xFFDC2626) else EmeraldSuccess,
           modifier = Modifier.weight(1f)
@@ -215,7 +207,7 @@ fun StudentDashboardTab(
                 color = Color(0xFF991B1B)
               )
               Text(
-                text = "₹${totalDue.toInt()} due for: ${unpaidMonths.joinToString { it.second.split(" ")[0] }}",
+                text = "₹${totalDue.toInt()} due since admission (${feeSummary.admissionDate}): ${unpaidMonths.joinToString { it.monthLabel.split(" ")[0] }}",
                 fontSize = 12.sp,
                 color = Color(0xFFB91C1C),
                 modifier = Modifier.padding(top = 2.dp)
@@ -239,14 +231,14 @@ fun StudentDashboardTab(
     item {
       SectionHeader(
         title = "Monthly Fee Schedule",
-        subtitle = "Session 2026-27 breakdown and clearance status"
+        subtitle = "From admission date (${feeSummary.admissionDate}) with payment adjustments"
       )
     }
 
-    items(sessionMonths) { (monthKey, monthLabel) ->
-      val isPaid = paidMonthsSet.contains(monthKey)
-      val isPending = pendingMonthsSet.contains(monthKey)
-      val matchingPayment = approvedPayments.find { it.monthsCovered.contains(monthKey) }
+    items(monthsElapsed) { m ->
+      val isPaid = m.isPaid
+      val isPending = m.isPending
+      val matchingPayment = m.matchingPayment
 
       Card(
         shape = RoundedCornerShape(16.dp),
@@ -296,15 +288,20 @@ fun StudentDashboardTab(
 
             Column {
               Text(
-                text = monthLabel,
+                text = m.monthLabel,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurface
               )
               Text(
-                text = "Tuition Fee: ₹${monthlyFee.toInt()}",
+                text = when {
+                  isPaid -> "Fee: ₹${m.feeAmount.toInt()} • Paid in Full"
+                  isPending -> "Fee: ₹${m.feeAmount.toInt()} • Verification Pending"
+                  m.paidAmount > 0 -> "Paid: ₹${m.paidAmount.toInt()} • Due: ₹${m.dueAmount.toInt()}"
+                  else -> "Tuition Fee: ₹${m.feeAmount.toInt()} • Due"
+                },
                 fontSize = 11.sp,
-                color = SlateTextSecondary,
+                color = if (isPaid) EmeraldSuccess else SlateTextSecondary,
                 fontFamily = FontFamily.Monospace
               )
             }
@@ -328,7 +325,7 @@ fun StudentDashboardTab(
               colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
               contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-              Text("Pay ₹${monthlyFee.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              Text("Pay ₹${m.dueAmount.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
           }
         }
@@ -412,7 +409,11 @@ fun StudentDashboardTab(
     StudentUpiPaymentDialog(
       student = student,
       monthlyFee = monthlyFee,
-      unpaidMonths = unpaidMonths,
+      unpaidMonths = if (unpaidMonths.isNotEmpty()) {
+        unpaidMonths.map { Pair(it.monthKey, it.monthLabel) }
+      } else {
+        listOf(Pair("Current", "Monthly Fee"))
+      },
       centerUpiId = centerInfo.upiId,
       centerUpiName = centerInfo.upiName,
       onDismiss = { showPaymentDialog = false },

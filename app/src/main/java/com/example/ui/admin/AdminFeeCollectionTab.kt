@@ -30,6 +30,8 @@ import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.ReceiptDialog
 import com.example.ui.components.SectionHeader
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
+import com.example.util.StudentFeeSummary
 import java.net.URLEncoder
 
 @Composable
@@ -39,6 +41,7 @@ fun AdminFeeCollectionTab(
   val context = LocalContext.current
   val students by repository.students.collectAsState()
   val courses by repository.courses.collectAsState()
+  val batches by repository.batches.collectAsState()
   val payments by repository.payments.collectAsState()
   val centerInfo by repository.centerInfo.collectAsState()
 
@@ -47,23 +50,20 @@ fun AdminFeeCollectionTab(
   var selectedReceipt by remember { mutableStateOf<FeePayment?>(null) }
   var paymentToDelete by remember { mutableStateOf<FeePayment?>(null) }
 
+  // Compute student fee summaries: payable per batch/course, duration from admission date, and website-adjusted payments
+  val studentSummaries = remember(students, courses, batches, payments) {
+    students.map { st ->
+      FeeCalculator.calculateStudentFeeSummary(st, courses, batches, payments)
+    }
+  }
+  val studentDuesList = studentSummaries.filter { it.dueAmount > 0 }
+
   // Fee collection form inputs
   var selectedStudentId by remember { mutableStateOf(students.firstOrNull()?.id ?: "") }
-  var collectAmount by remember { mutableStateOf("1200") }
+  var collectAmount by remember { mutableStateOf("400") }
   var collectMode by remember { mutableStateOf("CASH") }
-  var collectMonth by remember { mutableStateOf("April 2026") }
+  var collectMonth by remember { mutableStateOf("October 2026") }
   var collectRef by remember { mutableStateOf("") }
-
-  // Compute student dues
-  val approvedPayments = payments.filter { it.status == "approved" }
-  val studentDuesList = students.map { st ->
-    val course = courses.find { it.id == st.courseId }
-    val monthly = st.customMonthlyFeeOverride ?: (course?.monthlyFee ?: 1200.0)
-    val paid = approvedPayments.filter { it.studentId == st.id }.sumOf { it.finalAmountPaid }
-    val totalBilled = monthly * 5 // 5 months (Apr - Aug)
-    val due = maxOf(0.0, totalBilled - paid)
-    Triple(st, due, paid)
-  }.filter { it.second > 0 }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -174,63 +174,132 @@ fun AdminFeeCollectionTab(
           }
         }
       } else {
-        items(studentDuesList) { (student, dueAmount, _) ->
+        items(studentDuesList) { summary ->
+          val student = summary.student
+          val dueAmount = summary.dueAmount
+
           Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFECACA)),
             modifier = Modifier.fillMaxWidth()
           ) {
-            Row(
+            Column(
               modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
+              verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-                Text(text = "Roll: ${student.rollNo} • Mobile: ${student.mobile}", fontSize = 11.sp, color = SlateTextSecondary, fontFamily = FontFamily.Monospace)
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+              ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                  Text(text = "Roll: ${student.rollNo} • Mobile: ${student.mobile}", fontSize = 11.sp, color = SlateTextSecondary, fontFamily = FontFamily.Monospace)
+                  Text(
+                    text = "${summary.course?.title ?: "Academic Course"} • ${summary.batch?.name ?: "Assigned Batch"}",
+                    fontSize = 11.sp,
+                    color = IndigoPrimary,
+                    fontWeight = FontWeight.Medium
+                  )
+                  Text(
+                    text = "₹${summary.monthlyFee.toInt()}/mo • Admitted: ${summary.admissionDate} (${summary.monthsElapsed.size} mo billed: ₹${summary.totalBilled.toInt()})",
+                    fontSize = 10.sp,
+                    color = SlateTextSecondary
+                  )
+                }
+
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Text(
+                    text = "Due: ₹${dueAmount.toInt()}",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFFDC2626),
+                    fontFamily = FontFamily.Monospace
+                  )
+                  Text(
+                    text = "Paid: ₹${summary.totalPaid.toInt()}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = EmeraldSuccess
+                  )
+                }
+              }
+
+              // Pending months chip text
+              if (summary.unpaidMonths.isNotEmpty()) {
                 Text(
-                  text = "Due Amount: ₹${dueAmount.toInt()}",
-                  fontSize = 13.sp,
-                  fontWeight = FontWeight.Black,
-                  color = Color(0xFFDC2626),
-                  fontFamily = FontFamily.Monospace
+                  text = "Unpaid: ${summary.unpaidMonths.joinToString { it.monthLabel.split(" ")[0] }}",
+                  fontSize = 11.sp,
+                  color = Color(0xFFB91C1C),
+                  fontWeight = FontWeight.Medium
                 )
               }
 
-              Button(
-                onClick = {
-                  val reminderMessage = """
-                    *FEE DUE NOTICE - ${centerInfo.name}*
-                    Dear Parent/Student,
-                    This is a reminder regarding the pending tuition fee for *${student.name}* (Roll: ${student.rollNo}).
-                    
-                    Due Amount: ₹${dueAmount.toInt()}
-                    UPI ID: ${centerInfo.upiId} (${centerInfo.upiName})
-                    
-                    Kindly clear the dues at your earliest convenience or pay at the center desk.
-                    Helpline: ${centerInfo.phonePrimary}
-                  """.trimIndent()
-
-                  val cleanPhone = student.mobile.replace(Regex("[^0-9]"), "")
-                  val phoneWithCode = if (cleanPhone.startsWith("91")) cleanPhone else "91$cleanPhone"
-                  val waUrl = "https://wa.me/$phoneWithCode?text=${URLEncoder.encode(reminderMessage, "UTF-8")}"
-                  try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(waUrl))
-                    context.startActivity(intent)
-                  } catch (e: Exception) {
-                    Toast.makeText(context, "Could not open WhatsApp", Toast.LENGTH_SHORT).show()
-                  }
-                },
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("WhatsApp", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Button(
+                  onClick = {
+                    selectedStudentId = student.id
+                    collectAmount = (summary.unpaidMonths.firstOrNull()?.dueAmount ?: summary.monthlyFee).toInt().toString()
+                    collectMonth = summary.unpaidMonths.firstOrNull()?.monthLabel ?: "October 2026"
+                    showCollectDialog = true
+                  },
+                  shape = RoundedCornerShape(10.dp),
+                  colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                  Icon(Icons.Default.AddCard, contentDescription = null, modifier = Modifier.size(13.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Collect Fee", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Button(
+                  onClick = {
+                    val reminderMessage = """
+                      *FEE DUE NOTICE - ${centerInfo.name}*
+                      Dear Parent/Student,
+                      This is a reminder regarding the pending tuition fee for *${student.name}* (Roll: ${student.rollNo}).
+                      
+                      *Course:* ${summary.course?.title ?: "N/A"}
+                      *Batch:* ${summary.batch?.name ?: "N/A"}
+                      *Admission Date:* ${summary.admissionDate}
+                      *Monthly Fee:* ₹${summary.monthlyFee.toInt()}
+                      *Total Billed (${summary.monthsElapsed.size} Months):* ₹${summary.totalBilled.toInt()}
+                      *Total Already Paid (Adjusted):* ₹${summary.totalPaid.toInt()}
+                      *Outstanding Due:* ₹${dueAmount.toInt()}
+                      *Unpaid Months:* ${summary.unpaidMonths.joinToString { it.monthLabel }}
+                      
+                      UPI ID: ${centerInfo.upiId} (${centerInfo.upiName})
+                      Kindly clear the dues at your earliest convenience or pay at the center desk.
+                      Helpline: ${centerInfo.phonePrimary}
+                    """.trimIndent()
+
+                    val cleanPhone = student.mobile.replace(Regex("[^0-9]"), "")
+                    val phoneWithCode = if (cleanPhone.startsWith("91")) cleanPhone else "91$cleanPhone"
+                    val waUrl = "https://wa.me/$phoneWithCode?text=${URLEncoder.encode(reminderMessage, "UTF-8")}"
+                    try {
+                      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(waUrl))
+                      context.startActivity(intent)
+                    } catch (e: Exception) {
+                      Toast.makeText(context, "Could not open WhatsApp", Toast.LENGTH_SHORT).show()
+                    }
+                  },
+                  shape = RoundedCornerShape(10.dp),
+                  colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                  Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(13.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("WhatsApp", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
               }
             }
           }
@@ -343,7 +412,8 @@ fun AdminFeeCollectionTab(
 
           // Student selector
           var studentExpanded by remember { mutableStateOf(false) }
-          val selectedStudent = students.find { it.id == selectedStudentId }
+          val selectedStudent = students.find { it.id == selectedStudentId } ?: students.firstOrNull()
+          val selectedSummary = studentSummaries.find { it.student.id == selectedStudent?.id }
 
           OutlinedTextField(
             value = selectedStudent?.let { "${it.name} (${it.rollNo})" } ?: "Select Student",
@@ -365,13 +435,80 @@ fun AdminFeeCollectionTab(
             onDismissRequest = { studentExpanded = false }
           ) {
             students.forEach { s ->
+              val sSumm = studentSummaries.find { it.student.id == s.id }
               DropdownMenuItem(
-                text = { Text("${s.name} (${s.rollNo})") },
+                text = {
+                  Column {
+                    Text("${s.name} (${s.rollNo})", fontWeight = FontWeight.Bold)
+                    Text("Due: ₹${sSumm?.dueAmount?.toInt() ?: 0} • Fee: ₹${sSumm?.monthlyFee?.toInt() ?: 400}/mo", fontSize = 11.sp, color = SlateTextSecondary)
+                  }
+                },
                 onClick = {
                   selectedStudentId = s.id
+                  val summ = studentSummaries.find { it.student.id == s.id }
+                  collectAmount = (summ?.unpaidMonths?.firstOrNull()?.dueAmount ?: summ?.monthlyFee ?: 400.0).toInt().toString()
+                  collectMonth = summ?.unpaidMonths?.firstOrNull()?.monthLabel ?: "October 2026"
                   studentExpanded = false
                 }
               )
+            }
+          }
+
+          // Student Batch & Course Fee Summary Card
+          if (selectedSummary != null) {
+            Card(
+              shape = RoundedCornerShape(12.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+              border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                  text = "Course: ${selectedSummary.course?.title ?: "N/A"}",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF0F172A)
+                )
+                Text(
+                  text = "Batch: ${selectedSummary.batch?.name ?: "All Batches"} • Admitted: ${selectedSummary.admissionDate}",
+                  fontSize = 11.sp,
+                  color = SlateTextSecondary
+                )
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                  Text(
+                    text = "Rate: ₹${selectedSummary.monthlyFee.toInt()}/month",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = IndigoPrimary
+                  )
+                  Text(
+                    text = "Paid: ₹${selectedSummary.totalPaid.toInt()} • Due: ₹${selectedSummary.dueAmount.toInt()}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selectedSummary.dueAmount > 0) Color(0xFFDC2626) else EmeraldSuccess
+                  )
+                }
+              }
+            }
+
+            // Quick Amount Suggestion Chips
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              SuggestionChip(
+                onClick = { collectAmount = selectedSummary.monthlyFee.toInt().toString() },
+                label = { Text("1 Mo (₹${selectedSummary.monthlyFee.toInt()})", fontSize = 11.sp) }
+              )
+              if (selectedSummary.dueAmount > 0) {
+                SuggestionChip(
+                  onClick = { collectAmount = selectedSummary.dueAmount.toInt().toString() },
+                  label = { Text("Full Due (₹${selectedSummary.dueAmount.toInt()})", fontSize = 11.sp, color = Color(0xFFDC2626)) }
+                )
+              }
             }
           }
 
@@ -386,15 +523,31 @@ fun AdminFeeCollectionTab(
           OutlinedTextField(
             value = collectMonth,
             onValueChange = { collectMonth = it },
-            label = { Text("Billing Month (e.g. May 2026)") },
+            label = { Text("Billing Month (e.g. October 2026)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
           )
 
+          // Payment mode selection chips
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text("Mode:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateTextSecondary)
+            listOf("CASH", "UPI", "BANK_TRANSFER").forEach { m ->
+              FilterChip(
+                selected = collectMode == m,
+                onClick = { collectMode = m },
+                label = { Text(m, fontSize = 10.sp) }
+              )
+            }
+          }
+
           OutlinedTextField(
             value = collectRef,
             onValueChange = { collectRef = it },
-            label = { Text("Cash Voucher or UTR Reference") },
+            label = { Text("Voucher / UTR Reference") },
             placeholder = { Text("CSH-COUNTER") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
@@ -413,7 +566,7 @@ fun AdminFeeCollectionTab(
               onClick = {
                 val s = students.find { it.id == selectedStudentId }
                 if (s != null) {
-                  val amt = collectAmount.toDoubleOrNull() ?: 1200.0
+                  val amt = collectAmount.toDoubleOrNull() ?: (selectedSummary?.monthlyFee ?: 400.0)
                   val newPay = repository.submitStudentFeePayment(
                     student = s,
                     months = listOf(collectMonth),
