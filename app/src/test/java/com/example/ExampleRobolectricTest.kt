@@ -101,4 +101,26 @@ class ExampleRobolectricTest {
     val repo3 = PathsalaRepository(context)
     org.junit.Assert.assertNull("Session should be null after explicit logout", repo3.currentStudent.value)
   }
+
+  @Test
+  fun `delete payment removes receipt from ledger`() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repository = PathsalaRepository(context)
+
+    val student = repository.students.value.first()
+    val newPay = repository.submitStudentFeePayment(
+      student = student,
+      months = listOf("April 2026"),
+      amount = 1200.0,
+      mode = "CASH",
+      ref = "TEST-REF-DEL",
+      remarks = "Delete Test"
+    )
+    val countBefore = repository.payments.value.size
+    assertTrue(repository.payments.value.any { it.id == newPay.id })
+
+    repository.deletePayment(newPay.id)
+    assertEquals(countBefore - 1, repository.payments.value.size)
+    org.junit.Assert.assertFalse(repository.payments.value.any { it.id == newPay.id })
+  }
 }

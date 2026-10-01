@@ -45,6 +45,7 @@ fun AdminFeeCollectionTab(
   var selectedTab by remember { mutableStateOf("history") } // "history" or "dues"
   var showCollectDialog by remember { mutableStateOf(false) }
   var selectedReceipt by remember { mutableStateOf<FeePayment?>(null) }
+  var paymentToDelete by remember { mutableStateOf<FeePayment?>(null) }
 
   // Fee collection form inputs
   var selectedStudentId by remember { mutableStateOf(students.firstOrNull()?.id ?: "") }
@@ -244,39 +245,80 @@ fun AdminFeeCollectionTab(
         )
       }
 
-      items(payments) { pay ->
-        Card(
-          shape = RoundedCornerShape(16.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          border = androidx.compose.foundation.BorderStroke(1.dp, SlateBorder),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+      if (payments.isEmpty()) {
+        item {
+          Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, SlateBorder),
+            modifier = Modifier.fillMaxWidth()
           ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-              Text(text = pay.studentName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-              Text(text = "${pay.receiptNo} • ${pay.month}", fontSize = 11.sp, color = SlateTextSecondary, fontFamily = FontFamily.Monospace)
-              Text(text = "Mode: ${pay.paymentMode}", fontSize = 10.sp, color = SlateTextSecondary)
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = SlateTextSecondary, modifier = Modifier.size(36.dp))
+              Text("No Fee Transactions Found", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+              Text("Collected fees and records from website will appear here.", fontSize = 12.sp, color = SlateTextSecondary)
             }
+          }
+        }
+      } else {
+        items(payments) { pay ->
+          Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, SlateBorder),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                Text(text = pay.studentName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(text = "${pay.receiptNo} • ${pay.month}", fontSize = 11.sp, color = SlateTextSecondary, fontFamily = FontFamily.Monospace)
+                Text(text = "Mode: ${pay.paymentMode} • Date: ${pay.paymentDate}", fontSize = 10.sp, color = SlateTextSecondary)
+              }
 
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Text(
-                text = "₹${pay.finalAmountPaid.toInt()}",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurface
-              )
-              TextButton(
-                onClick = { selectedReceipt = pay },
-                contentPadding = PaddingValues(0.dp)
-              ) {
-                Text("Print Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+              Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                  text = "₹${pay.finalAmountPaid.toInt()}",
+                  fontSize = 15.sp,
+                  fontWeight = FontWeight.Black,
+                  fontFamily = FontFamily.Monospace,
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  TextButton(
+                    onClick = { selectedReceipt = pay },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                  ) {
+                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+                  }
+                  IconButton(
+                    onClick = { paymentToDelete = pay },
+                    modifier = Modifier.size(30.dp)
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Delete,
+                      contentDescription = "Delete Receipt",
+                      tint = Color(0xFFEF4444),
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
+                }
               }
             }
           }
@@ -401,7 +443,40 @@ fun AdminFeeCollectionTab(
     ReceiptDialog(
       payment = pay,
       centerName = centerInfo.name,
-      onDismiss = { selectedReceipt = null }
+      onDismiss = { selectedReceipt = null },
+      onDelete = {
+        val toDel = pay
+        selectedReceipt = null
+        paymentToDelete = toDel
+      }
+    )
+  }
+
+  paymentToDelete?.let { pay ->
+    AlertDialog(
+      onDismissRequest = { paymentToDelete = null },
+      title = { Text("Delete Fee Receipt?", fontWeight = FontWeight.Bold) },
+      text = {
+        Text("Are you sure you want to delete receipt ${pay.receiptNo} of ₹${pay.finalAmountPaid.toInt()} for ${pay.studentName}?\n\nThis will permanently delete this record from the receipt ledger and sync the removal with Google Sheets.")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val recNo = pay.receiptNo
+            repository.deletePayment(pay.id)
+            paymentToDelete = null
+            Toast.makeText(context, "Receipt $recNo deleted successfully", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+        ) {
+          Text("Delete", color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { paymentToDelete = null }) {
+          Text("Cancel")
+        }
+      }
     )
   }
 }

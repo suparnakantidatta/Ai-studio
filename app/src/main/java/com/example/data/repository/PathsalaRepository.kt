@@ -102,41 +102,14 @@ class PathsalaRepository(private val context: Context) {
   fun setServerUrl(newUrl: String) {
     ApiClient.setBaseUrl(newUrl, context)
     _serverUrl.value = ApiClient.getBaseUrl()
-    syncWithBackend(pushFirst = true)
+    syncWithBackend(pushFirst = false)
   }
 
-  fun syncWithBackend(pushFirst: Boolean = true) {
+  fun syncWithBackend(pushFirst: Boolean = false) {
     scope.launch(Dispatchers.IO) {
       _isSyncing.value = true
-      _connectionStatus.value = if (pushFirst) "Pushing to Google Sheet..." else "Syncing with Google Sheet..."
+      _connectionStatus.value = "Syncing with Google Sheet..."
       var syncSuccess = false
-
-      if (pushFirst) {
-        try {
-          android.util.Log.d("PathsalaRepository", "Pushing local data to Google Sheet...")
-          if (_students.value.isNotEmpty()) {
-            GoogleSheetSyncService.pushStudentsTable(_students.value)
-          }
-          if (_payments.value.isNotEmpty()) {
-            GoogleSheetSyncService.pushPaymentsTable(_payments.value)
-          }
-          if (_admissions.value.isNotEmpty()) {
-            GoogleSheetSyncService.pushAdmissionsTable(_admissions.value)
-          }
-          if (_liveClasses.value.isNotEmpty()) {
-            GoogleSheetSyncService.pushLiveClassesTable(_liveClasses.value)
-          }
-          if (_studyMaterials.value.isNotEmpty()) {
-            GoogleSheetSyncService.pushStudyMaterialsTable(_studyMaterials.value)
-          }
-          if (_exams.value.isNotEmpty()) {
-            GoogleSheetSyncService.pushExamsTable(_exams.value)
-          }
-          _connectionStatus.value = "Changes Pushed to Google Sheet"
-        } catch (e: Exception) {
-          android.util.Log.e("PathsalaRepository", "Push to Google Sheet error: ${e.message}")
-        }
-      }
 
       // 1. Prioritize Live Google Sheet Database
       try {
@@ -156,7 +129,10 @@ class PathsalaRepository(private val context: Context) {
           sheetDto.courses?.let { if (it.isNotEmpty()) _courses.value = it }
           sheetDto.batches?.let { if (it.isNotEmpty()) _batches.value = it }
           sheetDto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
-          sheetDto.payments?.let { if (it.isNotEmpty()) _payments.value = it }
+          sheetDto.payments?.let {
+            _payments.value = it
+            localStore.savePayments(it)
+          }
           sheetDto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
           sheetDto.liveClasses?.let { if (it.isNotEmpty()) _liveClasses.value = it }
           sheetDto.classRecordings?.let { if (it.isNotEmpty()) _recordings.value = it }
@@ -487,6 +463,22 @@ class PathsalaRepository(private val context: Context) {
         _connectionStatus.value = "Google Sheet Synced"
       } catch (e: Exception) {
         android.util.Log.e("PathsalaRepository", "Sync payment rejection error: ${e.message}")
+      }
+    }
+  }
+
+  fun deletePayment(paymentId: String) {
+    val updated = _payments.value.filterNot { it.id == paymentId || it.receiptNo == paymentId }
+    _payments.value = updated
+    localStore.savePayments(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushPaymentsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync payment deletion error: ${e.message}")
       }
     }
   }

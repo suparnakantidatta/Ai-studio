@@ -78,8 +78,8 @@ fun AdminMainScreen(
         actions = {
           IconButton(
             onClick = {
-              android.widget.Toast.makeText(context, "Syncing changes to Google Sheets...", android.widget.Toast.LENGTH_SHORT).show()
-              repository.syncWithBackend(pushFirst = true)
+              android.widget.Toast.makeText(context, "Syncing latest data from Google Sheets...", android.widget.Toast.LENGTH_SHORT).show()
+              repository.syncWithBackend(pushFirst = false)
             },
             enabled = !isSyncing
           ) {

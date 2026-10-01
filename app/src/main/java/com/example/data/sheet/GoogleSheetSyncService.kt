@@ -10,6 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.StringReader
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 object GoogleSheetSyncService {
@@ -223,22 +224,28 @@ object GoogleSheetSyncService {
     for (i in 1 until array.length()) {
       val row = array.optJSONArray(i) ?: continue
       val receiptNo = optCell(row, 0)
-      val paymentId = optCell(row, 1).ifBlank { "pay-$i" }
+      val paymentId = optCell(row, 1).ifBlank { receiptNo.ifBlank { "pay-$i" } }
       val studentId = optCell(row, 2)
       val studentName = optCell(row, 3)
-      val amount = optCell(row, 4).toDoubleOrNull() ?: 0.0
+      val amountStr = optCell(row, 4).replace("₹", "").replace(",", "").trim()
+      val amount = amountStr.toDoubleOrNull() ?: 0.0
       val mode = optCell(row, 5).ifBlank { "CASH" }
-      val month = optCell(row, 6).take(7)
+      val monthsRaw = optCell(row, 6).ifBlank { "Current Session" }
+      val monthsList = if (monthsRaw.contains(",")) monthsRaw.split(",").map { it.trim() } else listOf(monthsRaw)
+      val month = monthsList.firstOrNull() ?: monthsRaw
       val ref = optCell(row, 7)
-      val date = optCell(row, 8).take(10)
-      val status = optCell(row, 9).ifBlank { "approved" }
+      val date = optCell(row, 8).ifBlank { "2026-10-01" }
+      val rawStatus = optCell(row, 9).trim().lowercase(Locale.ROOT)
+      val status = if (rawStatus.contains("approve")) "approved" else if (rawStatus.contains("reject")) "rejected" else if (rawStatus.contains("pending")) "pending" else "approved"
       val approvedBy = optCell(row, 10).ifBlank { "Admin" }
       val remarks = optCell(row, 11)
+
+      if (receiptNo.isBlank() && studentName.isBlank() && amount == 0.0) continue
 
       list.add(
         FeePayment(
           id = paymentId,
-          receiptNo = receiptNo,
+          receiptNo = receiptNo.ifBlank { "REC-AUTO-$i" },
           studentId = studentId,
           studentName = studentName,
           baseMonthlyFee = amount,
@@ -246,7 +253,7 @@ object GoogleSheetSyncService {
           finalAmountPaid = amount,
           paymentMode = mode,
           month = month,
-          monthsCovered = listOf(month),
+          monthsCovered = monthsList,
           transactionRef = ref,
           paymentDate = date,
           status = status,
@@ -805,13 +812,13 @@ object GoogleSheetSyncService {
       if (ch == '\"') {
         inQuotes = !inQuotes
       } else if (ch == ',' && !inQuotes) {
-        tokens.add(sb.toString().trim())
+        tokens.add(sb.toString().trim().removeSurrounding("\""))
         sb.clear()
       } else {
         sb.append(ch)
       }
     }
-    tokens.add(sb.toString().trim())
+    tokens.add(sb.toString().trim().removeSurrounding("\""))
     return tokens
   }
 

@@ -228,7 +228,8 @@ fun SectionHeader(
 fun ReceiptDialog(
   payment: FeePayment,
   centerName: String = "Pixel Pathsala",
-  onDismiss: () -> Unit
+  onDismiss: () -> Unit,
+  onDelete: (() -> Unit)? = null
 ) {
   val context = LocalContext.current
   val clipboardManager = LocalClipboardManager.current
@@ -371,6 +372,20 @@ fun ReceiptDialog(
             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text("Share", fontSize = 12.sp)
+          }
+        }
+
+        if (onDelete != null) {
+          OutlinedButton(
+            onClick = onDelete,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Icon(Icons.Default.DeleteOutline, contentDescription = "Delete Receipt", modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Delete Receipt", fontSize = 12.sp, fontWeight = FontWeight.Bold)
           }
         }
       }
