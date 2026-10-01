@@ -1,5 +1,7 @@
 package com.example.ui.admin
 
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,9 +26,20 @@ fun AdminMainScreen(
   onLogout: () -> Unit
 ) {
   val context = androidx.compose.ui.platform.LocalContext.current
+  val activity = context as? ComponentActivity
   var selectedTab by remember { mutableStateOf(0) }
   var academicSubTab by remember { mutableIntStateOf(0) }
   var showSettingsDialog by remember { mutableStateOf(false) }
+  var showLogoutDialog by remember { mutableStateOf(false) }
+
+  // Prevent back key from logging out: return to Tab 0 or minimize app
+  BackHandler {
+    if (selectedTab != 0) {
+      selectedTab = 0
+    } else {
+      activity?.moveTaskToBack(true)
+    }
+  }
 
   val payments by repository.payments.collectAsState()
   val admissions by repository.admissions.collectAsState()
@@ -83,7 +96,7 @@ fun AdminMainScreen(
               tint = Color(0xFFCBD5E1)
             )
           }
-          IconButton(onClick = onLogout) {
+          IconButton(onClick = { showLogoutDialog = true }) {
             Icon(
               imageVector = Icons.Default.Logout,
               contentDescription = "Logout",
@@ -232,6 +245,30 @@ fun AdminMainScreen(
     AdminSettingsDialog(
       repository = repository,
       onDismiss = { showSettingsDialog = false }
+    )
+  }
+
+  if (showLogoutDialog) {
+    AlertDialog(
+      onDismissRequest = { showLogoutDialog = false },
+      title = { Text("Log Out?", fontWeight = FontWeight.Bold) },
+      text = { Text("Are you sure you want to log out of the Admin Console?") },
+      confirmButton = {
+        Button(
+          onClick = {
+            showLogoutDialog = false
+            onLogout()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+        ) {
+          Text("Log Out", color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showLogoutDialog = false }) {
+          Text("Cancel")
+        }
+      }
     )
   }
 }

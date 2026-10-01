@@ -74,10 +74,10 @@ class PathsalaRepository(private val context: Context) {
   private val _submissions = MutableStateFlow(localStore.getExamSubmissions())
   val submissions: StateFlow<List<ExamSubmission>> = _submissions.asStateFlow()
 
-  private val _currentStudent = MutableStateFlow<Student?>(null)
+  private val _currentStudent = MutableStateFlow<Student?>(localStore.getLoggedInStudent())
   val currentStudent: StateFlow<Student?> = _currentStudent.asStateFlow()
 
-  private val _currentAdmin = MutableStateFlow<AdminAccount?>(null)
+  private val _currentAdmin = MutableStateFlow<AdminAccount?>(localStore.getLoggedInAdmin())
   val currentAdmin: StateFlow<AdminAccount?> = _currentAdmin.asStateFlow()
 
   private val _isSyncing = MutableStateFlow(false)
@@ -144,7 +144,15 @@ class PathsalaRepository(private val context: Context) {
         if (sheetDto != null) {
           localStore.saveAll(sheetDto)
           sheetDto.centerInfo?.let { _centerInfo.value = it }
-          sheetDto.students?.let { if (it.isNotEmpty()) _students.value = it }
+          sheetDto.students?.let { if (it.isNotEmpty()) {
+            _students.value = it
+            _currentStudent.value?.let { current ->
+              it.find { s -> s.id == current.id || s.mobile == current.mobile }?.let { updatedStudent ->
+                _currentStudent.value = updatedStudent
+                localStore.saveLoggedInStudent(updatedStudent)
+              }
+            }
+          } }
           sheetDto.courses?.let { if (it.isNotEmpty()) _courses.value = it }
           sheetDto.batches?.let { if (it.isNotEmpty()) _batches.value = it }
           sheetDto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
@@ -161,6 +169,7 @@ class PathsalaRepository(private val context: Context) {
             localStore.saveAdminAccount(it)
             if (_currentAdmin.value != null) {
               _currentAdmin.value = it
+              localStore.saveLoggedInAdmin(it)
             }
           }
           syncSuccess = true
@@ -179,7 +188,15 @@ class PathsalaRepository(private val context: Context) {
           if (dto != null) {
             localStore.saveAll(dto)
             dto.centerInfo?.let { _centerInfo.value = it }
-            dto.students?.let { if (it.isNotEmpty()) _students.value = it }
+            dto.students?.let { if (it.isNotEmpty()) {
+              _students.value = it
+              _currentStudent.value?.let { current ->
+                it.find { s -> s.id == current.id || s.mobile == current.mobile }?.let { updatedStudent ->
+                  _currentStudent.value = updatedStudent
+                  localStore.saveLoggedInStudent(updatedStudent)
+                }
+              }
+            } }
             dto.courses?.let { if (it.isNotEmpty()) _courses.value = it }
             dto.batches?.let { if (it.isNotEmpty()) _batches.value = it }
             dto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
@@ -195,6 +212,7 @@ class PathsalaRepository(private val context: Context) {
               localStore.saveAdminAccount(it)
               if (_currentAdmin.value != null) {
                 _currentAdmin.value = it
+                localStore.saveLoggedInAdmin(it)
               }
             }
           }
@@ -261,6 +279,7 @@ class PathsalaRepository(private val context: Context) {
         val student = res.body()!!.student!!
         ApiClient.authToken = res.body()?.token
         _currentStudent.value = student
+        localStore.saveLoggedInStudent(student)
 
         // Sync fresh fees from API for this student
         try {
@@ -304,6 +323,7 @@ class PathsalaRepository(private val context: Context) {
 
     return if (student != null) {
       _currentStudent.value = student
+      localStore.saveLoggedInStudent(student)
       Result.success(student)
     } else {
       Result.failure(IllegalArgumentException("No student found with this Mobile and Aadhaar/Roll No. Please check credentials."))
@@ -312,6 +332,7 @@ class PathsalaRepository(private val context: Context) {
 
   fun logoutStudent() {
     _currentStudent.value = null
+    localStore.saveLoggedInStudent(null)
     ApiClient.authToken = null
   }
 
@@ -336,6 +357,7 @@ class PathsalaRepository(private val context: Context) {
           email = dto?.email ?: "admin@pixelpathsala.com"
         )
         _currentAdmin.value = account
+        localStore.saveLoggedInAdmin(account)
         return Result.success(account)
       }
     } catch (_: Exception) {
@@ -348,6 +370,7 @@ class PathsalaRepository(private val context: Context) {
 
     return if (matchesUser && matchesPass) {
       _currentAdmin.value = localAdmin
+      localStore.saveLoggedInAdmin(localAdmin)
       Result.success(localAdmin)
     } else {
       Result.failure(IllegalArgumentException("Invalid admin credentials. Please check username and password."))
@@ -356,6 +379,7 @@ class PathsalaRepository(private val context: Context) {
 
   fun logoutAdmin() {
     _currentAdmin.value = null
+    localStore.saveLoggedInAdmin(null)
     ApiClient.authToken = null
   }
 

@@ -1,5 +1,7 @@
 package com.example.ui.student
 
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -13,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,9 +31,21 @@ fun StudentMainScreen(
   repository: PathsalaRepository,
   onLogout: () -> Unit
 ) {
+  val context = LocalContext.current
+  val activity = context as? ComponentActivity
   var selectedTab by remember { mutableStateOf(0) }
+  var showLogoutDialog by remember { mutableStateOf(false) }
   val isSyncing by repository.isSyncing.collectAsState()
   val liveClasses by repository.liveClasses.collectAsState()
+
+  // Prevent back key from logging out: return to Tab 0 or minimize app
+  BackHandler {
+    if (selectedTab != 0) {
+      selectedTab = 0
+    } else {
+      activity?.moveTaskToBack(true)
+    }
+  }
 
   val hasActiveLiveClass = liveClasses.any {
     it.status == "live" && (it.batchId == "all" || it.batchId == student.batchId)
@@ -71,7 +86,7 @@ fun StudentMainScreen(
               tint = if (isSyncing) Color(0xFFFBBF24) else Color.White
             )
           }
-          IconButton(onClick = onLogout) {
+          IconButton(onClick = { showLogoutDialog = true }) {
             Icon(
               imageVector = Icons.Default.Logout,
               contentDescription = "Logout",
@@ -166,5 +181,29 @@ fun StudentMainScreen(
         3 -> StudentMaterialsTab(student = student, repository = repository)
       }
     }
+  }
+
+  if (showLogoutDialog) {
+    AlertDialog(
+      onDismissRequest = { showLogoutDialog = false },
+      title = { Text("Log Out?", fontWeight = FontWeight.Bold) },
+      text = { Text("Are you sure you want to log out of your student account?") },
+      confirmButton = {
+        Button(
+          onClick = {
+            showLogoutDialog = false
+            onLogout()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+        ) {
+          Text("Log Out", color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showLogoutDialog = false }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 }

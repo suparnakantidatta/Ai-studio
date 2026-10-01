@@ -698,6 +698,37 @@ class LocalDataStore(context: Context) {
     prefs.edit().putString(key, adapter.toJson(value)).apply()
   }
 
+  private inline fun <reified T> getNullableObject(key: String): T? {
+    val json = prefs.getString(key, null) ?: return null
+    return try {
+      val adapter = moshi.adapter(T::class.java)
+      adapter.fromJson(json)
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private inline fun <reified T> putNullableObject(key: String, value: T?) {
+    if (value == null) {
+      prefs.edit().remove(key).apply()
+    } else {
+      val adapter = moshi.adapter(T::class.java)
+      prefs.edit().putString(key, adapter.toJson(value)).apply()
+    }
+  }
+
+  // Active User Session Persistence
+  fun getLoggedInStudent(): Student? = getNullableObject("active_session_student")
+  fun saveLoggedInStudent(student: Student?) = putNullableObject("active_session_student", student)
+
+  fun getLoggedInAdmin(): AdminAccount? = getNullableObject("active_session_admin")
+  fun saveLoggedInAdmin(admin: AdminAccount?) = putNullableObject("active_session_admin", admin)
+
+  fun clearSession() {
+    saveLoggedInStudent(null)
+    saveLoggedInAdmin(null)
+  }
+
   private inline fun <reified T> getList(key: String, defaultValue: List<T>): List<T> {
     val json = prefs.getString(key, null) ?: return defaultValue
     return try {

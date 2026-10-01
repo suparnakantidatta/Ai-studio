@@ -76,4 +76,29 @@ class ExampleRobolectricTest {
     val success = com.example.data.sheet.GoogleSheetSyncService.postToWebhook("{\"action\":\"ping\"}")
     assertTrue(success)
   }
+
+  @Test
+  fun `session persists across app restarts until explicit logout`() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo1 = PathsalaRepository(context)
+
+    // Clear any previous session
+    repo1.logoutStudent()
+    repo1.logoutAdmin()
+
+    // 1. Log in student
+    val loginResult = repo1.loginStudent("9876543210", "453289012345")
+    assertTrue(loginResult.isSuccess)
+    assertEquals("Rohan Sharma", repo1.currentStudent.value?.name)
+
+    // 2. Simulate app restart (creating a new repository instance as occurs when app restarts)
+    val repo2 = PathsalaRepository(context)
+    assertNotNull("Session should persist on restart", repo2.currentStudent.value)
+    assertEquals("Rohan Sharma", repo2.currentStudent.value?.name)
+
+    // 3. Explicit logout clears session
+    repo2.logoutStudent()
+    val repo3 = PathsalaRepository(context)
+    org.junit.Assert.assertNull("Session should be null after explicit logout", repo3.currentStudent.value)
+  }
 }

@@ -31,11 +31,19 @@ class MainActivity : ComponentActivity() {
 
     setContent {
       PixelPathsalaTheme {
-        var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.Login) }
-        var showServerConfigDialog by remember { mutableStateOf(false) }
-
         val currentStudent by repository.currentStudent.collectAsState()
         val currentAdmin by repository.currentAdmin.collectAsState()
+
+        var currentScreen by remember {
+          mutableStateOf<AppScreen>(
+            when {
+              currentStudent != null -> AppScreen.StudentPortal
+              currentAdmin != null -> AppScreen.AdminErp
+              else -> AppScreen.Login
+            }
+          )
+        }
+        var showServerConfigDialog by remember { mutableStateOf(false) }
 
         // Sync screen with session state
         LaunchedEffect(currentStudent, currentAdmin) {
@@ -43,6 +51,8 @@ class MainActivity : ComponentActivity() {
             currentScreen = AppScreen.StudentPortal
           } else if (currentAdmin != null && currentScreen == AppScreen.Login) {
             currentScreen = AppScreen.AdminErp
+          } else if (currentStudent == null && currentAdmin == null && currentScreen != AppScreen.Login) {
+            currentScreen = AppScreen.Login
           }
         }
 
@@ -62,8 +72,7 @@ class MainActivity : ComponentActivity() {
 
             AppScreen.StudentPortal -> {
               BackHandler {
-                repository.logoutStudent()
-                currentScreen = AppScreen.Login
+                moveTaskToBack(true)
               }
               val student = currentStudent
               if (student != null) {
@@ -82,8 +91,7 @@ class MainActivity : ComponentActivity() {
 
             AppScreen.AdminErp -> {
               BackHandler {
-                repository.logoutAdmin()
-                currentScreen = AppScreen.Login
+                moveTaskToBack(true)
               }
               AdminMainScreen(
                 repository = repository,
