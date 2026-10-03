@@ -85,10 +85,10 @@ object GoogleSheetSyncService {
   }
 
   private fun parseWebhookData(dataObj: JSONObject): DatabaseDataDto {
-    val students = parseStudentsTable(dataObj.optJSONArray("Students"))
+    val admissions = parseAdmissionsTable(dataObj.optJSONArray("Admissions"))
+    val students = parseStudentsTable(dataObj.optJSONArray("Students"), admissions)
     val (courses, batches) = parseCoursesBatchesTable(dataObj.optJSONArray("Courses_Batches"))
     val payments = parsePaymentsTable(dataObj.optJSONArray("Fee_Transactions"))
-    val admissions = parseAdmissionsTable(dataObj.optJSONArray("Admissions"))
     val educators = parseEducatorsTable(dataObj.optJSONArray("Educators"))
     val centerInfo = parseCenterOverviewTable(dataObj.optJSONArray("Center_Overview"))
     val adminAccounts = parseAdminsTable(dataObj.optJSONArray("Admin_Credentials"))
@@ -117,9 +117,31 @@ object GoogleSheetSyncService {
     )
   }
 
-  private fun parseStudentsTable(array: JSONArray?): List<Student> {
+  private fun parseStudentsTable(
+    array: JSONArray?,
+    admissionsList: List<AdmissionApplication>? = null
+  ): List<Student> {
     val list = mutableListOf<Student>()
     if (array == null || array.length() <= 1) return list
+
+    // Check header indices if available in row 0
+    val headerRow = array.optJSONArray(0)
+    var customFeeCol = 13
+    var discountCol = -1
+    var admDateCol = 11
+    var baseFeeCol = 14
+    var totalPaidCol = 15
+
+    if (headerRow != null) {
+      for (c in 0 until headerRow.length()) {
+        val h = headerRow.optString(c, "").lowercase().trim()
+        if (h.contains("discount") || h.contains("concession")) discountCol = c
+        if (h.contains("custom") || h.contains("override")) customFeeCol = c
+        if (h.contains("admission") || h.contains("joining")) admDateCol = c
+        if (h.contains("base fee") || h.contains("monthly base")) baseFeeCol = c
+        if (h.contains("total paid") || h.contains("amount paid")) totalPaidCol = c
+      }
+    }
 
     for (i in 1 until array.length()) {
       val row = array.optJSONArray(i) ?: continue
@@ -134,9 +156,40 @@ object GoogleSheetSyncService {
       val address = optCell(row, 8)
       val courseId = optCell(row, 9)
       val batchId = optCell(row, 10)
-      val admissionDate = optCell(row, 11).take(10).ifBlank { "2026-08-01" }
+      val rawDate = optCell(row, admDateCol)
+      var admissionDate = if (rawDate.contains("T")) rawDate.substringBefore("T") else rawDate.take(10).ifBlank { "2026-08-01" }
+
+      // Check if admissions table has an earlier applied date for this student
+      if (admissionsList != null) {
+        val matchingApp = admissionsList.find { app ->
+          (app.studentName.isNotBlank() && app.studentName.equals(name, ignoreCase = true)) ||
+          (app.mobile.isNotBlank() && app.mobile == mobile) ||
+          (app.aadhaarNo.isNotBlank() && app.aadhaarNo == aadhaar)
+        }
+        if (matchingApp != null && matchingApp.appliedDate.isNotBlank()) {
+          val appDate = if (matchingApp.appliedDate.contains("T")) matchingApp.appliedDate.substringBefore("T") else matchingApp.appliedDate.take(10)
+          // If student date is late October or blank or after applied date, prefer applied date
+          if (admissionDate.startsWith("2026-10") && appDate.startsWith("2026-08")) {
+            admissionDate = appDate
+          }
+        }
+      }
+
+      val admissionMonth = admissionDate.take(7).ifBlank { "2026-08" }
       val status = optCell(row, 12).ifBlank { "active" }
-      val customFee = optCell(row, 13).replace("₹", "").replace(",", "").trim().toDoubleOrNull()
+      val customFee = optCell(row, customFeeCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull()
+      val baseFee = if (baseFeeCol != -1) optCell(row, baseFeeCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull() else null
+      val totalPaidInSheet = if (totalPaidCol != -1) optCell(row, totalPaidCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull() else null
+
+      val explicitDiscount = if (discountCol != -1) {
+        optCell(row, discountCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull()
+      } else null
+
+      val standardFeeVal = baseFee ?: 400.0
+      val monthlyDiscount = explicitDiscount
+        ?: if (customFee != null && customFee > 0 && customFee < standardFeeVal) {
+          if (customFee <= standardFeeVal / 2) customFee else (standardFeeVal - customFee)
+        } else null
 
       list.add(
         Student(
@@ -152,8 +205,11 @@ object GoogleSheetSyncService {
           courseId = courseId,
           batchId = batchId,
           admissionDate = admissionDate,
+          admissionMonth = admissionMonth,
           status = status,
-          customMonthlyFeeOverride = customFee
+          customMonthlyFeeOverride = customFee,
+          monthlyDiscount = monthlyDiscount,
+          totalPaidInSheet = totalPaidInSheet
         )
       )
     }
@@ -283,6 +339,11 @@ object GoogleSheetSyncService {
       val courseId = optCell(row, 7)
       val status = optCell(row, 8).ifBlank { "pending" }
       val appliedDate = optCell(row, 9).take(10)
+      val initialFeeStatus = optCell(row, 10).ifBlank { "paid_advance" }
+      val paymentMode = optCell(row, 11).ifBlank { "UPI" }
+      val paymentRef = optCell(row, 12).ifBlank { null }
+      val remarks = optCell(row, 13).ifBlank { null }
+      val rejReason = optCell(row, 14).ifBlank { null }
       val address = optCell(row, 15)
 
       list.add(
@@ -298,6 +359,11 @@ object GoogleSheetSyncService {
           targetCourseId = courseId,
           status = status,
           appliedDate = appliedDate,
+          initialPaymentStatus = initialFeeStatus,
+          initialPaymentMode = paymentMode,
+          initialPaymentRef = paymentRef,
+          remarks = remarks,
+          rejectionReason = rejReason,
           address = address
         )
       )
@@ -417,10 +483,16 @@ object GoogleSheetSyncService {
   }
 
   private fun fetchViaDirectCsv(): DatabaseDataDto {
+    val admissions = fetchCsvRows("Admissions", GIDS["Admissions"] ?: "120081180")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseAdmissionsTable(arr)
+    } ?: emptyList()
+
     val students = fetchCsvRows("Students", GIDS["Students"] ?: "1572610885")?.let { rows ->
       val arr = JSONArray()
       rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseStudentsTable(arr)
+      parseStudentsTable(arr, admissions)
     } ?: emptyList()
 
     val (courses, batches) = fetchCsvRows("Courses_Batches", GIDS["Courses_Batches"] ?: "563739523")?.let { rows ->
@@ -451,12 +523,6 @@ object GoogleSheetSyncService {
       val arr = JSONArray()
       rows.forEach { r -> arr.put(JSONArray(r)) }
       parseAdminsTable(arr)
-    } ?: emptyList()
-
-    val admissions = fetchCsvRows("Admissions", GIDS["Admissions"] ?: "120081180")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseAdmissionsTable(arr)
     } ?: emptyList()
 
     val liveClasses = fetchCsvRows("Live_Classes", GIDS["Live_Classes"] ?: "1629684060")?.let { rows ->

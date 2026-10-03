@@ -187,4 +187,166 @@ class ExampleRobolectricTest {
     assertEquals(expectedBilled - 400.0, summaryWithPay.dueAmount, 0.01)
     assertTrue(summaryWithPay.monthsElapsed.first().isPaid)
   }
+
+  @Test
+  fun `discount is calculated and payable from admission month is net of discount`() {
+    val studentWithDiscount = com.example.data.model.Student(
+      id = "stu-disc-1",
+      rollNo = "PP-2026-111",
+      name = "Amitava Roy",
+      mobile = "9876500000",
+      aadhaarNo = "111122223333",
+      courseId = "course-xi",
+      batchId = "batch-morning",
+      admissionDate = "2026-08-15", // August 2026
+      monthlyDiscount = 50.0,
+      discountReason = "Merit Concession"
+    )
+
+    val course = com.example.data.model.Course(
+      id = "course-xi",
+      title = "Computer Science (XI)",
+      code = "COMS-011",
+      monthlyFee = 400.0
+    )
+
+    val batch = com.example.data.model.Batch(
+      id = "batch-morning",
+      name = "Morning Batch",
+      courseId = "course-xi"
+    )
+
+    val summary = com.example.util.FeeCalculator.calculateStudentFeeSummary(
+      student = studentWithDiscount,
+      courses = listOf(course),
+      batches = listOf(batch),
+      allPayments = emptyList()
+    )
+
+    assertEquals(400.0, summary.standardMonthlyFee, 0.01)
+    assertEquals(50.0, summary.monthlyDiscount, 0.01)
+    assertEquals(350.0, summary.effectiveMonthlyFee, 0.01)
+    assertEquals(350.0, summary.monthlyFee, 0.01)
+
+    // Number of months from August 2026 to October 2026 = 3 months
+    val mos = summary.monthsElapsed.size
+    assertTrue("At least 3 billing months from August 2026", mos >= 3)
+
+    val expectedGross = mos * 400.0
+    val expectedDiscount = mos * 50.0
+    val expectedNetPayable = expectedGross - expectedDiscount
+
+    assertEquals(expectedGross, summary.totalGrossBilled, 0.01)
+    assertEquals(expectedGross, summary.grossBilledFromAdmissionMonth, 0.01)
+    assertEquals(expectedDiscount, summary.totalDiscountAllowed, 0.01)
+    assertEquals(expectedNetPayable, summary.payableFromAdmissionMonth, 0.01)
+    assertEquals(expectedNetPayable, summary.dueAmount, 0.01)
+
+    // Verify each month's status reflects discount
+    summary.monthsElapsed.forEach { m ->
+      assertEquals(400.0, m.standardFee, 0.01)
+      assertEquals(50.0, m.discount, 0.01)
+      assertEquals(350.0, m.netPayable, 0.01)
+    }
+  }
+
+  @Test
+  fun `admissions application date resolves true admission month when student date was defaulted`() {
+    val studentLateDate = com.example.data.model.Student(
+      id = "stu-test-late",
+      rollNo = "PP-2026-593",
+      name = "Test",
+      mobile = "1234567890",
+      aadhaarNo = "123456789012",
+      courseId = "course-xi",
+      batchId = "batch-morning",
+      admissionDate = "2026-10-28" // Late default
+    )
+
+    val admissionApp = com.example.data.model.AdmissionApplication(
+      id = "adm-1788976622086",
+      studentName = "Test",
+      mobile = "1234567890",
+      aadhaarNo = "123456789012",
+      targetCourseId = "course-xi",
+      appliedDate = "2026-08-21T18:30:00.000Z",
+      status = "approved"
+    )
+
+    val course = com.example.data.model.Course(
+      id = "course-xi",
+      title = "Computer Science (XI)",
+      code = "COMS-011",
+      monthlyFee = 400.0
+    )
+
+    val batch = com.example.data.model.Batch(
+      id = "batch-morning",
+      name = "Morning Batch",
+      courseId = "course-xi"
+    )
+
+    val summary = com.example.util.FeeCalculator.calculateStudentFeeSummary(
+      student = studentLateDate,
+      courses = listOf(course),
+      batches = listOf(batch),
+      allPayments = emptyList(),
+      admissions = listOf(admissionApp)
+    )
+
+    // Should resolve to August 2026, giving 3 months instead of 1
+    assertEquals("August 2026", summary.admissionMonth)
+    assertTrue("Should bill 3 months since August application", summary.monthsElapsed.size >= 3)
+    // Application had status="approved" and default initialPaymentStatus="paid_advance", so synthesized payment covers admission month
+    assertEquals(400.0, summary.totalPaid, 0.01)
+    val expectedGross = summary.monthsElapsed.size * 400.0
+    assertEquals(expectedGross, summary.payableFromAdmissionMonth, 0.01)
+    assertEquals(expectedGross - 400.0, summary.dueAmount, 0.01)
+  }
+
+  @Test
+  fun `custom fee override of 50 is treated as monthly discount concession`() {
+    val studentWithOverride = com.example.data.model.Student(
+      id = "stu-override",
+      rollNo = "PP-2026-999",
+      name = "Subhasis Mondal",
+      mobile = "9876543210",
+      aadhaarNo = "999988887777",
+      courseId = "course-xi",
+      batchId = "batch-morning",
+      admissionDate = "2026-08-01",
+      customMonthlyFeeOverride = 50.0 // Entered 50 as concession amount
+    )
+
+    val course = com.example.data.model.Course(
+      id = "course-xi",
+      title = "Computer Science (XI)",
+      code = "COMS-011",
+      monthlyFee = 400.0
+    )
+
+    val batch = com.example.data.model.Batch(
+      id = "batch-morning",
+      name = "Morning Batch",
+      courseId = "course-xi"
+    )
+
+    val discount = com.example.util.FeeCalculator.getMonthlyDiscount(studentWithOverride, listOf(course), listOf(batch))
+    val netFee = com.example.util.FeeCalculator.getMonthlyFee(studentWithOverride, listOf(course), listOf(batch))
+
+    assertEquals(50.0, discount, 0.01)
+    assertEquals(350.0, netFee, 0.01)
+
+    val summary = com.example.util.FeeCalculator.calculateStudentFeeSummary(
+      student = studentWithOverride,
+      courses = listOf(course),
+      batches = listOf(batch),
+      allPayments = emptyList()
+    )
+
+    assertEquals(50.0, summary.monthlyDiscount, 0.01)
+    assertEquals(350.0, summary.effectiveMonthlyFee, 0.01)
+    val mos = summary.monthsElapsed.size
+    assertEquals(mos * 350.0, summary.payableFromAdmissionMonth, 0.01)
+  }
 }

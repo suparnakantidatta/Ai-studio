@@ -53,8 +53,11 @@ fun AdminApprovalsTab(
   var enrollAdmissionTarget by remember { mutableStateOf<AdmissionApplication?>(null) }
   var assignedRollNo by remember { mutableStateOf("") }
   var assignedBatchId by remember { mutableStateOf("") }
+  var enrollAdmissionDate by remember { mutableStateOf("") }
+  var enrollMonthlyDiscount by remember { mutableStateOf("") }
+  var enrollDiscountReason by remember { mutableStateOf("") }
   var isFeePaidChecked by remember { mutableStateOf(true) }
-  var feePaidAmount by remember { mutableStateOf("1200") }
+  var feePaidAmount by remember { mutableStateOf("400") }
 
   var generatedReceiptToView by remember { mutableStateOf<FeePayment?>(null) }
 
@@ -350,7 +353,13 @@ fun AdminApprovalsTab(
                     enrollAdmissionTarget = app
                     assignedRollNo = "PP-2026-${(100..999).random()}"
                     assignedBatchId = app.preferredBatchId ?: (batches.firstOrNull()?.id ?: "batch-1")
-                    feePaidAmount = targetCourse?.monthlyFee?.toInt()?.toString() ?: "1200"
+                    enrollAdmissionDate = if (app.appliedDate.isNotBlank()) {
+                      if (app.appliedDate.contains("T")) app.appliedDate.substringBefore("T") else app.appliedDate.take(10)
+                    } else "2026-08-15"
+                    enrollMonthlyDiscount = ""
+                    enrollDiscountReason = "Merit Concession"
+                    val stdFee = targetCourse?.monthlyFee?.toInt() ?: 400
+                    feePaidAmount = stdFee.toString()
                   },
                   shape = RoundedCornerShape(10.dp),
                   colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
@@ -476,6 +485,40 @@ fun AdminApprovalsTab(
             }
           }
 
+          OutlinedTextField(
+            value = enrollAdmissionDate,
+            onValueChange = { enrollAdmissionDate = it },
+            label = { Text("Admission Date (YYYY-MM-DD)") },
+            placeholder = { Text("2026-08-15") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          OutlinedTextField(
+            value = enrollMonthlyDiscount,
+            onValueChange = {
+              enrollMonthlyDiscount = it.filter { c -> c.isDigit() || c == '.' }
+              val disc = it.toDoubleOrNull() ?: 0.0
+              val stdFee = (courses.find { c -> c.id == app.targetCourseId }?.monthlyFee ?: 400.0)
+              feePaidAmount = maxOf(0.0, stdFee - disc).toInt().toString()
+            },
+            label = { Text("Monthly Discount Concession (₹)") },
+            placeholder = { Text("e.g. 50") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          if (enrollMonthlyDiscount.isNotBlank() && (enrollMonthlyDiscount.toDoubleOrNull() ?: 0.0) > 0) {
+            OutlinedTextField(
+              value = enrollDiscountReason,
+              onValueChange = { enrollDiscountReason = it },
+              label = { Text("Concession Reason") },
+              placeholder = { Text("Merit Concession / Sibling Waiver") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth()
+            )
+          }
+
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -508,14 +551,18 @@ fun AdminApprovalsTab(
             Spacer(modifier = Modifier.width(8.dp))
             Button(
               onClick = {
+                val disc = enrollMonthlyDiscount.toDoubleOrNull()
                 val enrolled = repository.approveAdmission(
                   applicationId = app.id,
                   assignedBatchId = assignedBatchId,
                   customRollNo = assignedRollNo,
                   isFeePaid = isFeePaidChecked,
-                  feeAmount = feePaidAmount.toDoubleOrNull() ?: 1200.0,
+                  feeAmount = feePaidAmount.toDoubleOrNull() ?: 400.0,
                   paymentMode = app.initialPaymentMode ?: "UPI",
-                  paymentRef = app.initialPaymentRef ?: "ADM-DESK-ONBOARD"
+                  paymentRef = app.initialPaymentRef ?: "ADM-DESK-ONBOARD",
+                  monthlyDiscount = disc,
+                  discountReason = if (disc != null && disc > 0) enrollDiscountReason.ifBlank { "Merit Concession" } else null,
+                  customAdmissionDate = enrollAdmissionDate.trim().ifBlank { null }
                 )
                 enrollAdmissionTarget = null
                 Toast.makeText(context, "Student ${enrolled?.name} enrolled successfully!", Toast.LENGTH_LONG).show()

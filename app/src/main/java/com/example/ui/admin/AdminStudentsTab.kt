@@ -44,6 +44,7 @@ fun AdminStudentsTab(
   var searchQuery by remember { mutableStateOf("") }
   var filterStatus by remember { mutableStateOf("all") }
   var showAddDialog by remember { mutableStateOf(false) }
+  var editingStudent by remember { mutableStateOf<Student?>(null) }
 
   // Add student form inputs
   var newName by remember { mutableStateOf("") }
@@ -57,6 +58,9 @@ fun AdminStudentsTab(
   var newCourseId by remember { mutableStateOf(courses.firstOrNull()?.id ?: "course-1788019409876") }
   var newBatchId by remember { mutableStateOf(batches.firstOrNull()?.id ?: "batch-1788019693229") }
   var newDeliveryMode by remember { mutableStateOf("offline") }
+  var newAdmissionDate by remember { mutableStateOf(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())) }
+  var newMonthlyDiscount by remember { mutableStateOf("") }
+  var newDiscountReason by remember { mutableStateOf("") }
   var recordFeeAtAdmission by remember { mutableStateOf(true) }
   var admissionFeeAmount by remember { mutableStateOf("400") }
   var customFeeOverrideText by remember { mutableStateOf("") }
@@ -224,10 +228,20 @@ fun AdminStudentsTab(
                 fontWeight = FontWeight.Bold,
                 color = SlateTextPrimary
               )
+              val stdFee = course?.monthlyFee?.toInt() ?: 400
+              val disc = student.monthlyDiscount?.toInt() ?: if (student.customMonthlyFeeOverride != null && student.customMonthlyFeeOverride < stdFee) (stdFee - student.customMonthlyFeeOverride.toInt()) else 0
+              val netFee = maxOf(0, stdFee - disc)
+              Text(
+                text = "Rate: ₹$stdFee/mo" + (if (disc > 0) " (-₹$disc discount)" else "") + " = ₹$netFee/mo net",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = IndigoPrimary
+              )
             }
             Column(horizontalAlignment = Alignment.End) {
-              Text(text = "Contact Mobile", fontSize = 10.sp, color = SlateTextSecondary)
+              Text(text = "Admitted / Mobile", fontSize = 10.sp, color = SlateTextSecondary)
               Text(text = student.mobile, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+              Text(text = "Adm: ${student.admissionDate}", fontSize = 10.sp, color = SlateTextSecondary)
             }
           }
 
@@ -244,17 +258,28 @@ fun AdminStudentsTab(
               fontFamily = FontFamily.Monospace
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+              OutlinedButton(
+                onClick = { editingStudent = student },
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+              ) {
+                Icon(Icons.Default.EditCalendar, contentDescription = null, modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(3.dp))
+                Text("Edit Fee/Adm", fontSize = 10.sp)
+              }
+
               TextButton(
                 onClick = {
                   val newStatus = if (student.status == "active") "passed_out" else "active"
                   repository.updateStudentStatus(student.id, newStatus)
                   Toast.makeText(context, "${student.name} marked as $newStatus & synced to Google Sheet", Toast.LENGTH_SHORT).show()
-                }
+                },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
               ) {
                 Text(
-                  text = if (student.status == "active") "Mark Alumni" else "Mark Active",
-                  fontSize = 11.sp,
+                  text = if (student.status == "active") "Alumni" else "Active",
+                  fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
                   color = IndigoPrimary
                 )
@@ -265,9 +290,9 @@ fun AdminStudentsTab(
                   repository.deleteStudent(student.id)
                   Toast.makeText(context, "Student deleted and removed from Google Sheet", Toast.LENGTH_SHORT).show()
                 },
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(28.dp)
               ) {
-                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
               }
             }
           }
@@ -569,15 +594,37 @@ fun AdminStudentsTab(
               }
 
               OutlinedTextField(
-                value = customFeeOverrideText,
-                onValueChange = { customFeeOverrideText = it.filter { c -> c.isDigit() || c == '.' } },
-                label = { Text("Fee Override (₹)") },
-                placeholder = { Text("Custom fee if any") },
+                value = newMonthlyDiscount,
+                onValueChange = { newMonthlyDiscount = it.filter { c -> c.isDigit() || c == '.' } },
+                label = { Text("Monthly Discount (₹)") },
+                placeholder = { Text("e.g. 50") },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1.3f)
+                modifier = Modifier.weight(1f)
               )
             }
+
+            if (newMonthlyDiscount.isNotBlank()) {
+              OutlinedTextField(
+                value = newDiscountReason,
+                onValueChange = { newDiscountReason = it },
+                label = { Text("Discount Concession Reason") },
+                placeholder = { Text("e.g. Merit Scholarship / Early Bird") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+              )
+            }
+
+            OutlinedTextField(
+              value = newAdmissionDate,
+              onValueChange = { newAdmissionDate = it },
+              label = { Text("Admission Date (YYYY-MM-DD) *") },
+              placeholder = { Text("e.g. 2026-08-15") },
+              singleLine = true,
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.fillMaxWidth()
+            )
 
             // Collect initial fee toggle
             Surface(
@@ -669,6 +716,7 @@ fun AdminStudentsTab(
                 } else {
                   val fee = admissionFeeAmount.toDoubleOrNull() ?: 400.0
                   val customFee = customFeeOverrideText.toDoubleOrNull()
+                  val disc = newMonthlyDiscount.toDoubleOrNull()
                   repository.directEnrollStudent(
                     name = newName,
                     mobile = newMobile,
@@ -681,6 +729,8 @@ fun AdminStudentsTab(
                     batchId = newBatchId,
                     academicClass = newClass,
                     customFeeOverride = customFee,
+                    monthlyDiscount = disc,
+                    customAdmissionDate = newAdmissionDate.trim(),
                     collectFeeNow = recordFeeAtAdmission,
                     feeAmount = fee,
                     paymentMode = paymentModeChoice,
@@ -694,6 +744,8 @@ fun AdminStudentsTab(
                   newAadhaar = ""
                   newGuardianName = ""
                   newGuardianPhone = ""
+                  newMonthlyDiscount = ""
+                  newDiscountReason = ""
                 }
               },
               shape = RoundedCornerShape(12.dp),
@@ -707,5 +759,125 @@ fun AdminStudentsTab(
         }
       }
     }
+  }
+
+  // Edit Admission Date & Discount Dialog for existing student
+  editingStudent?.let { st ->
+    val course = courses.find { it.id == st.courseId }
+    var editAdmDate by remember(st) { mutableStateOf(st.admissionDate.ifBlank { "2026-08-15" }) }
+    var editDiscountText by remember(st) { mutableStateOf(st.monthlyDiscount?.toInt()?.toString() ?: "") }
+    var editDiscountReason by remember(st) { mutableStateOf(st.discountReason ?: "Merit Scholarship") }
+    var editOverrideText by remember(st) { mutableStateOf(st.customMonthlyFeeOverride?.toInt()?.toString() ?: "") }
+
+    val stdFee = course?.monthlyFee?.toInt() ?: 400
+
+    AlertDialog(
+      onDismissRequest = { editingStudent = null },
+      title = {
+        Column {
+          Text("Edit Fee & Admission", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+          Text("${st.name} • ${course?.title ?: "Enrolled Course"}", fontSize = 12.sp, color = SlateTextSecondary)
+        }
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+          Text("1. Admission Date (Determines months billed)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+          OutlinedTextField(
+            value = editAdmDate,
+            onValueChange = { editAdmDate = it },
+            label = { Text("Admission Date (YYYY-MM-DD)") },
+            placeholder = { Text("2026-08-15") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("2026-08-01" to "August 2026", "2026-09-01" to "September 2026", "2026-10-01" to "October 2026").forEach { (dt, label) ->
+              FilterChip(
+                selected = editAdmDate.startsWith(dt.take(7)),
+                onClick = { editAdmDate = dt },
+                label = { Text(label, fontSize = 9.sp) }
+              )
+            }
+          }
+
+          Text("2. Monthly Discount Concession", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+          OutlinedTextField(
+            value = editDiscountText,
+            onValueChange = { editDiscountText = it.filter { c -> c.isDigit() || c == '.' } },
+            label = { Text("Monthly Discount (₹) (Standard: ₹$stdFee)") },
+            placeholder = { Text("e.g. 50") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("0" to "₹0", "50" to "₹50/mo", "100" to "₹100/mo", "150" to "₹150/mo").forEach { (disc, label) ->
+              FilterChip(
+                selected = editDiscountText == disc,
+                onClick = { editDiscountText = disc },
+                label = { Text(label, fontSize = 9.sp) }
+              )
+            }
+          }
+
+          OutlinedTextField(
+            value = editDiscountReason,
+            onValueChange = { editDiscountReason = it },
+            label = { Text("Discount Concession Reason") },
+            placeholder = { Text("Merit Scholarship / Sibling Waiver") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          val previewDisc = editDiscountText.toDoubleOrNull() ?: 0.0
+          val previewNet = maxOf(0.0, stdFee.toDouble() - previewDisc)
+          Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(8.dp)) {
+              Text(
+                text = "Preview: Standard ₹$stdFee - Discount ₹${previewDisc.toInt()} = Net ₹${previewNet.toInt()}/month",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = IndigoPrimary
+              )
+              Text(
+                text = "All past & future monthly dues will be automatically recalculated from ${editAdmDate.take(7)}.",
+                fontSize = 10.sp,
+                color = SlateTextSecondary
+              )
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val discVal = editDiscountText.toDoubleOrNull()
+            val overrideVal = editOverrideText.toDoubleOrNull()
+            repository.updateStudentAdmissionAndDiscount(
+              studentId = st.id,
+              newAdmissionDate = editAdmDate.trim(),
+              newMonthlyDiscount = discVal,
+              newCustomFeeOverride = overrideVal,
+              newDiscountReason = editDiscountReason.trim().ifBlank { null }
+            )
+            editingStudent = null
+            Toast.makeText(context, "Student fee & admission updated! Dues recalculated.", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+        ) {
+          Text("Save Changes")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { editingStudent = null }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 }

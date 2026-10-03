@@ -366,7 +366,9 @@ class PathsalaRepository(private val context: Context) {
     amount: Double,
     mode: String,
     ref: String,
-    remarks: String?
+    remarks: String?,
+    discount: Double = 0.0,
+    discountReason: String? = null
   ): FeePayment {
     val currentYear = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
     val monthNumber = SimpleDateFormat("MM", Locale.getDefault()).format(Date())
@@ -376,6 +378,7 @@ class PathsalaRepository(private val context: Context) {
     val batch = _batches.value.find { it.id == student.batchId }
     val course = _courses.value.find { it.id == student.courseId } ?: _courses.value.find { it.id == batch?.courseId }
 
+    val baseFee = amount + discount
     val newPayment = FeePayment(
       id = paymentId,
       receiptNo = receiptNo,
@@ -387,9 +390,10 @@ class PathsalaRepository(private val context: Context) {
       batchName = batch?.name ?: "Batch",
       month = months.joinToString(", "),
       monthsCovered = months,
-      baseMonthlyFee = amount,
-      totalBaseFee = amount,
-      totalDiscount = 0.0,
+      baseMonthlyFee = if (months.isNotEmpty()) baseFee / months.size else baseFee,
+      totalBaseFee = baseFee,
+      totalDiscount = discount,
+      discountBreakdown = discountReason,
       finalAmountPaid = amount,
       remainingDue = 0.0,
       paymentMode = mode,
@@ -494,7 +498,10 @@ class PathsalaRepository(private val context: Context) {
     isFeePaid: Boolean,
     feeAmount: Double,
     paymentMode: String,
-    paymentRef: String
+    paymentRef: String,
+    monthlyDiscount: Double? = null,
+    discountReason: String? = null,
+    customAdmissionDate: String? = null
   ): Student? {
     val app = _admissions.value.find { it.id == applicationId } ?: return null
     val currentYear = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
@@ -502,6 +509,11 @@ class PathsalaRepository(private val context: Context) {
 
     val course = _courses.value.find { it.id == app.targetCourseId }
     val batch = _batches.value.find { it.id == assignedBatchId }
+
+    val appDate = app.appliedDate.ifBlank { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
+    val admDate = if (appDate.contains("T")) appDate.substringBefore("T") else appDate.take(10)
+    val cleanAdmDate = customAdmissionDate?.takeIf { it.isNotBlank() } ?: admDate
+    val cleanAdmMonth = cleanAdmDate.take(7)
 
     val newStudent = Student(
       id = "stu-${System.currentTimeMillis()}",
@@ -517,9 +529,11 @@ class PathsalaRepository(private val context: Context) {
       address = app.address,
       courseId = app.targetCourseId,
       batchId = assignedBatchId,
-      admissionDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
-      admissionMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date()),
-      status = "active"
+      admissionDate = cleanAdmDate,
+      admissionMonth = cleanAdmMonth,
+      status = "active",
+      monthlyDiscount = monthlyDiscount,
+      discountReason = discountReason
     )
 
     val updatedStudents = listOf(newStudent) + _students.value
@@ -543,14 +557,16 @@ class PathsalaRepository(private val context: Context) {
         courseTitle = course?.title ?: "Tuition Course",
         batchName = batch?.name ?: "Batch",
         month = "Admission Fee",
-        monthsCovered = listOf(SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())),
-        baseMonthlyFee = feeAmount,
-        totalBaseFee = feeAmount,
+        monthsCovered = listOf(cleanAdmMonth),
+        baseMonthlyFee = course?.monthlyFee ?: feeAmount,
+        totalBaseFee = course?.monthlyFee ?: feeAmount,
+        totalDiscount = monthlyDiscount ?: 0.0,
+        discountBreakdown = discountReason,
         finalAmountPaid = feeAmount,
         paymentMode = paymentMode,
         transactionRef = paymentRef.ifBlank { "CSH-DESK-ONBOARD" },
         status = "approved",
-        paymentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+        paymentDate = cleanAdmDate,
         approvedBy = "Admin Desk"
       )
       val updatedPayments = listOf(receipt) + _payments.value
@@ -588,10 +604,12 @@ class PathsalaRepository(private val context: Context) {
     batchId: String,
     academicClass: String,
     customFeeOverride: Double?,
-    collectFeeNow: Boolean,
-    feeAmount: Double,
-    paymentMode: String,
-    transactionRef: String
+    monthlyDiscount: Double? = null,
+    customAdmissionDate: String? = null,
+    collectFeeNow: Boolean = false,
+    feeAmount: Double = 0.0,
+    paymentMode: String = "CASH",
+    transactionRef: String = ""
   ): Student {
     val currentYear = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
     val randomRoll = (100..999).random()
@@ -599,6 +617,10 @@ class PathsalaRepository(private val context: Context) {
 
     val course = _courses.value.find { it.id == courseId }
     val batch = _batches.value.find { it.id == batchId }
+
+    val admDate = customAdmissionDate?.trim()?.ifBlank { null }
+      ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    val admMonth = admDate.take(7)
 
     val newStudent = Student(
       id = "stu-${System.currentTimeMillis()}",
@@ -614,10 +636,11 @@ class PathsalaRepository(private val context: Context) {
       address = address.trim(),
       courseId = courseId,
       batchId = batchId,
-      admissionDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
-      admissionMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date()),
+      admissionDate = admDate,
+      admissionMonth = admMonth,
       status = "active",
-      customMonthlyFeeOverride = customFeeOverride
+      customMonthlyFeeOverride = customFeeOverride,
+      monthlyDiscount = monthlyDiscount
     )
 
     val updatedStudents = listOf(newStudent) + _students.value
@@ -697,6 +720,41 @@ class PathsalaRepository(private val context: Context) {
         _connectionStatus.value = "Google Sheet Synced"
       } catch (e: Exception) {
         android.util.Log.e("PathsalaRepository", "Sync student status error: ${e.message}")
+      }
+    }
+  }
+
+  fun updateStudentAdmissionAndDiscount(
+    studentId: String,
+    newAdmissionDate: String,
+    newMonthlyDiscount: Double?,
+    newCustomFeeOverride: Double?,
+    newDiscountReason: String? = null
+  ) {
+    val cleanDate = newAdmissionDate.trim()
+    val cleanMonth = cleanDate.take(7)
+    val updated = _students.value.map { s ->
+      if (s.id == studentId) {
+        s.copy(
+          admissionDate = cleanDate,
+          admissionMonth = cleanMonth,
+          monthlyDiscount = newMonthlyDiscount,
+          customMonthlyFeeOverride = newCustomFeeOverride,
+          discountReason = newDiscountReason ?: s.discountReason
+        )
+      } else {
+        s
+      }
+    }
+    _students.value = updated
+    localStore.saveStudents(updated)
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushStudentsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Error pushing students update: ${e.message}")
       }
     }
   }

@@ -42,7 +42,10 @@ data class Student(
   val admissionMonth: String = "2026-04",
   val status: String = "active", // active, passed_out, dropped
   val notes: String? = null,
-  val customMonthlyFeeOverride: Double? = null
+  val customMonthlyFeeOverride: Double? = null,
+  val monthlyDiscount: Double? = null,
+  val discountReason: String? = null,
+  val totalPaidInSheet: Double? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -136,7 +139,7 @@ data class Expense(
 @JsonClass(generateAdapter = true)
 data class AdmissionApplication(
   val id: String,
-  val applicationNo: String,
+  val applicationNo: String = "",
   val studentName: String,
   val studentClass: String? = "Class 10 (Secondary)",
   val mobile: String,

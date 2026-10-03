@@ -51,13 +51,14 @@ fun StudentDashboardTab(
   val batches by repository.batches.collectAsState()
   val payments by repository.payments.collectAsState()
   val centerInfo by repository.centerInfo.collectAsState()
+  val admissions by repository.admissions.collectAsState()
 
   val studentCourse = courses.find { it.id == student.courseId }
   val studentBatch = batches.find { it.id == student.batchId }
 
   // Dynamic fee calculation as per batch & course, admission date, and website-adjusted payments
-  val feeSummary = remember(student, courses, batches, payments) {
-    FeeCalculator.calculateStudentFeeSummary(student, courses, batches, payments)
+  val feeSummary = remember(student, courses, batches, payments, admissions) {
+    FeeCalculator.calculateStudentFeeSummary(student, courses, batches, payments, admissions)
   }
 
   val monthlyFee = feeSummary.monthlyFee
@@ -150,36 +151,92 @@ fun StudentDashboardTab(
               )
             }
           }
+
+          // Fee Structure & Discount Info Row
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFFEFF6FF))
+              .padding(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "Standard: ₹${feeSummary.standardMonthlyFee.toInt()}/mo" +
+                  if (feeSummary.monthlyDiscount > 0) " • Discount: -₹${feeSummary.monthlyDiscount.toInt()}/mo" else "",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF1E3A8A)
+              )
+              Text(
+                text = "Admitted: ${feeSummary.admissionMonth} (${feeSummary.billedMonthsCount} billing months elapsed)",
+                fontSize = 10.sp,
+                color = SlateTextSecondary
+              )
+            }
+            Text(
+              text = "Net: ₹${feeSummary.effectiveMonthlyFee.toInt()}/mo",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Black,
+              color = IndigoPrimary
+            )
+          }
         }
       }
     }
 
-    // Financial Overview Metric Cards
+    // Financial Overview Metric Cards (4 Cards)
     item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-      ) {
-        MetricCard(
-          title = "Total Paid",
-          value = "₹${totalPaid.toInt()}",
-          subtitle = "${approvedPayments.size} Verified Receipts",
-          icon = Icons.Default.CheckCircle,
-          iconTint = EmeraldSuccess,
-          modifier = Modifier.weight(1f)
-        )
-        MetricCard(
-          title = "Pending Due",
-          value = if (totalDue > 0) "₹${totalDue.toInt()}" else "₹0",
-          subtitle = when {
-            totalDue > 0 -> "${unpaidMonths.size} Months Due"
-            advanceAmount > 0 -> "Advance: ₹${advanceAmount.toInt()}"
-            else -> "All Cleared"
-          },
-          icon = if (totalDue > 0) Icons.Default.Warning else Icons.Default.Verified,
-          iconTint = if (totalDue > 0) Color(0xFFDC2626) else EmeraldSuccess,
-          modifier = Modifier.weight(1f)
-        )
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          MetricCard(
+            title = "Payable from Admission",
+            value = "₹${feeSummary.payableFromAdmissionMonth.toInt()}",
+            subtitle = "Since ${feeSummary.admissionMonth} (${feeSummary.billedMonthsCount} Mos)",
+            icon = Icons.Default.AccountBalanceWallet,
+            iconTint = IndigoPrimary,
+            modifier = Modifier.weight(1f)
+          )
+          MetricCard(
+            title = "Discount Allowed",
+            value = "₹${feeSummary.totalDiscountAllowed.toInt()}",
+            subtitle = if (feeSummary.monthlyDiscount > 0) "₹${feeSummary.monthlyDiscount.toInt()}/mo Applied" else "Concessions",
+            icon = Icons.Default.Discount,
+            iconTint = Color(0xFF7C3AED),
+            modifier = Modifier.weight(1f)
+          )
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          MetricCard(
+            title = "Total Paid",
+            value = "₹${totalPaid.toInt()}",
+            subtitle = "${approvedPayments.size} Verified Receipts",
+            icon = Icons.Default.CheckCircle,
+            iconTint = EmeraldSuccess,
+            modifier = Modifier.weight(1f)
+          )
+          MetricCard(
+            title = "Pending Due",
+            value = if (totalDue > 0) "₹${totalDue.toInt()}" else "₹0",
+            subtitle = when {
+              totalDue > 0 -> "${unpaidMonths.size} Months Due"
+              advanceAmount > 0 -> "Advance: ₹${advanceAmount.toInt()}"
+              else -> "All Cleared"
+            },
+            icon = if (totalDue > 0) Icons.Default.Warning else Icons.Default.Verified,
+            iconTint = if (totalDue > 0) Color(0xFFDC2626) else EmeraldSuccess,
+            modifier = Modifier.weight(1f)
+          )
+        }
       }
     }
 
@@ -294,14 +351,22 @@ fun StudentDashboardTab(
                 color = MaterialTheme.colorScheme.onSurface
               )
               Text(
+                text = "Standard: ₹${m.standardFee.toInt()}" +
+                  (if (m.discount > 0) " • Disc: -₹${m.discount.toInt()}" else "") +
+                  " • Net: ₹${m.netPayable.toInt()}",
+                fontSize = 11.sp,
+                color = SlateTextSecondary
+              )
+              Text(
                 text = when {
-                  isPaid -> "Fee: ₹${m.feeAmount.toInt()} • Paid in Full"
-                  isPending -> "Fee: ₹${m.feeAmount.toInt()} • Verification Pending"
-                  m.paidAmount > 0 -> "Paid: ₹${m.paidAmount.toInt()} • Due: ₹${m.dueAmount.toInt()}"
-                  else -> "Tuition Fee: ₹${m.feeAmount.toInt()} • Due"
+                  isPaid -> "Status: Paid in Full (₹${m.paidAmount.toInt()})"
+                  isPending -> "Status: Verification Pending"
+                  m.paidAmount > 0 -> "Status: Partially Paid (Paid: ₹${m.paidAmount.toInt()} • Due: ₹${m.dueAmount.toInt()})"
+                  else -> "Status: Due (₹${m.dueAmount.toInt()})"
                 },
                 fontSize = 11.sp,
-                color = if (isPaid) EmeraldSuccess else SlateTextSecondary,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isPaid) EmeraldSuccess else if (isPending) AmberPending else Color(0xFFDC2626),
                 fontFamily = FontFamily.Monospace
               )
             }

@@ -44,16 +44,18 @@ fun AdminFeeCollectionTab(
   val batches by repository.batches.collectAsState()
   val payments by repository.payments.collectAsState()
   val centerInfo by repository.centerInfo.collectAsState()
+  val admissions by repository.admissions.collectAsState()
 
   var selectedTab by remember { mutableStateOf("history") } // "history" or "dues"
   var showCollectDialog by remember { mutableStateOf(false) }
   var selectedReceipt by remember { mutableStateOf<FeePayment?>(null) }
   var paymentToDelete by remember { mutableStateOf<FeePayment?>(null) }
+  var studentToEditFee by remember { mutableStateOf<StudentFeeSummary?>(null) }
 
   // Compute student fee summaries: payable per batch/course, duration from admission date, and website-adjusted payments
-  val studentSummaries = remember(students, courses, batches, payments) {
+  val studentSummaries = remember(students, courses, batches, payments, admissions) {
     students.map { st ->
-      FeeCalculator.calculateStudentFeeSummary(st, courses, batches, payments)
+      FeeCalculator.calculateStudentFeeSummary(st, courses, batches, payments, admissions)
     }
   }
   val studentDuesList = studentSummaries.filter { it.dueAmount > 0 }
@@ -61,6 +63,8 @@ fun AdminFeeCollectionTab(
   // Fee collection form inputs
   var selectedStudentId by remember { mutableStateOf(students.firstOrNull()?.id ?: "") }
   var collectAmount by remember { mutableStateOf("400") }
+  var collectDiscount by remember { mutableStateOf("") }
+  var collectDiscountReason by remember { mutableStateOf("") }
   var collectMode by remember { mutableStateOf("CASH") }
   var collectMonth by remember { mutableStateOf("October 2026") }
   var collectRef by remember { mutableStateOf("") }
@@ -144,12 +148,72 @@ fun AdminFeeCollectionTab(
     }
 
     if (selectedTab == "dues") {
-      // DUES TRACKER WITH WHATSAPP REMINDER TRIGGER
+      // OVERVIEW METRIC SUMMARY FOR OUTSTANDING DUES
       item {
-        SectionHeader(
-          title = "Students with Outstanding Tuition Fees",
-          subtitle = "Dispatch one-tap WhatsApp payment reminders with UPI details"
-        )
+        val totalPayableAll = studentSummaries.sumOf { it.payableFromAdmissionMonth }
+        val totalDiscountAll = studentSummaries.sumOf { it.totalDiscountAllowed }
+        val totalPaidAll = studentSummaries.sumOf { it.totalPaid }
+        val totalDueAll = studentSummaries.sumOf { it.dueAmount }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          SectionHeader(
+            title = "Tuition Fee Dues & Billing Overview",
+            subtitle = "Calculated from admission month with course/batch rates & website adjusted payments"
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
+              modifier = Modifier.weight(1f)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Payable from Adm.", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+                Text("₹${totalPayableAll.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color(0xFF1E3A8A))
+                Text("Net billed", fontSize = 9.sp, color = SlateTextSecondary)
+              }
+            }
+
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFFAF5FF)),
+              modifier = Modifier.weight(1f)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Discounts Given", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED))
+                Text("₹${totalDiscountAll.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color(0xFF581C87))
+                Text("Fee concessions", fontSize = 9.sp, color = SlateTextSecondary)
+              }
+            }
+
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+              modifier = Modifier.weight(1f)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Total Paid", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EmeraldSuccess)
+                Text("₹${totalPaidAll.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color(0xFF065F46))
+                Text("Verified receipts", fontSize = 9.sp, color = SlateTextSecondary)
+              }
+            }
+
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
+              modifier = Modifier.weight(1f)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Pending Due", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                Text("₹${totalDueAll.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color(0xFF991B1B))
+                Text("${studentDuesList.size} students", fontSize = 9.sp, color = SlateTextSecondary)
+              }
+            }
+          }
+        }
       }
 
       if (studentDuesList.isEmpty()) {
@@ -188,7 +252,7 @@ fun AdminFeeCollectionTab(
               modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(8.dp)
+              verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
               Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -196,25 +260,20 @@ fun AdminFeeCollectionTab(
                 verticalAlignment = Alignment.Top
               ) {
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                  Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                  Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                   Text(text = "Roll: ${student.rollNo} • Mobile: ${student.mobile}", fontSize = 11.sp, color = SlateTextSecondary, fontFamily = FontFamily.Monospace)
                   Text(
                     text = "${summary.course?.title ?: "Academic Course"} • ${summary.batch?.name ?: "Assigned Batch"}",
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = IndigoPrimary,
-                    fontWeight = FontWeight.Medium
-                  )
-                  Text(
-                    text = "₹${summary.monthlyFee.toInt()}/mo • Admitted: ${summary.admissionDate} (${summary.monthsElapsed.size} mo billed: ₹${summary.totalBilled.toInt()})",
-                    fontSize = 10.sp,
-                    color = SlateTextSecondary
+                    fontWeight = FontWeight.SemiBold
                   )
                 }
 
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                   Text(
                     text = "Due: ₹${dueAmount.toInt()}",
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Black,
                     color = Color(0xFFDC2626),
                     fontFamily = FontFamily.Monospace
@@ -228,14 +287,95 @@ fun AdminFeeCollectionTab(
                 }
               }
 
-              // Pending months chip text
-              if (summary.unpaidMonths.isNotEmpty()) {
+              // Rate & Discount Breakdown Chip Row
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(Color(0xFFF8FAFC))
+                  .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
                 Text(
-                  text = "Unpaid: ${summary.unpaidMonths.joinToString { it.monthLabel.split(" ")[0] }}",
+                  text = "Rate: ₹${summary.standardMonthlyFee.toInt()}/mo",
                   fontSize = 11.sp,
-                  color = Color(0xFFB91C1C),
-                  fontWeight = FontWeight.Medium
+                  fontWeight = FontWeight.Medium,
+                  color = SlateTextPrimary
                 )
+                if (summary.monthlyDiscount > 0) {
+                  Text(
+                    text = "Discount: -₹${summary.monthlyDiscount.toInt()}/mo",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF7C3AED)
+                  )
+                }
+                Text(
+                  text = "Net: ₹${summary.effectiveMonthlyFee.toInt()}/mo",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = IndigoPrimary
+                )
+              }
+
+              // Highlight Card: Net Payable from Admission Month & Paid Adjustment
+              Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFF1F5F9),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Text(
+                      text = "Payable from Admission (${summary.admissionMonth}):",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = Color(0xFF1E293B)
+                    )
+                    Text(
+                      text = "₹${summary.payableFromAdmissionMonth.toInt()}",
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Black,
+                      color = Color(0xFF0F172A)
+                    )
+                  }
+                  Text(
+                    text = "${summary.billedMonthsCount} billing months (Gross: ₹${summary.grossBilledFromAdmissionMonth.toInt()} - Discount: ₹${summary.totalDiscountAllowed.toInt()})",
+                    fontSize = 10.sp,
+                    color = SlateTextSecondary
+                  )
+                }
+              }
+
+              // Months status preview
+              if (summary.monthsElapsed.isNotEmpty()) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  summary.monthsElapsed.forEach { m ->
+                    val isMthPaid = m.isPaid
+                    Box(
+                      modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isMthPaid) Color(0xFFDCFCE7) else Color(0xFFFEE2E2))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                      Text(
+                        text = "${m.monthLabel.split(" ")[0]}: ${if (isMthPaid) "Paid" else "Due"}",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isMthPaid) Color(0xFF166534) else Color(0xFF991B1B)
+                      )
+                    }
+                  }
+                }
               }
 
               Row(
@@ -243,36 +383,53 @@ fun AdminFeeCollectionTab(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
               ) {
+                OutlinedButton(
+                  onClick = { studentToEditFee = summary },
+                  shape = RoundedCornerShape(10.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                  Icon(Icons.Default.EditCalendar, contentDescription = null, modifier = Modifier.size(13.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Edit Fee/Discount", fontSize = 11.sp)
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
                 Button(
                   onClick = {
                     selectedStudentId = student.id
-                    collectAmount = (summary.unpaidMonths.firstOrNull()?.dueAmount ?: summary.monthlyFee).toInt().toString()
+                    val firstUnpaidDue = summary.unpaidMonths.firstOrNull()?.dueAmount ?: summary.monthlyFee
+                    collectAmount = firstUnpaidDue.toInt().toString()
+                    collectDiscount = ""
+                    collectDiscountReason = ""
                     collectMonth = summary.unpaidMonths.firstOrNull()?.monthLabel ?: "October 2026"
                     showCollectDialog = true
                   },
                   shape = RoundedCornerShape(10.dp),
                   colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                   Icon(Icons.Default.AddCard, contentDescription = null, modifier = Modifier.size(13.dp))
                   Spacer(modifier = Modifier.width(4.dp))
                   Text("Collect Fee", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
                 Button(
                   onClick = {
                     val reminderMessage = """
                       *FEE DUE NOTICE - ${centerInfo.name}*
                       Dear Parent/Student,
-                      This is a reminder regarding the pending tuition fee for *${student.name}* (Roll: ${student.rollNo}).
+                      This is an official fee reminder for *${student.name}* (Roll: ${student.rollNo}).
                       
                       *Course:* ${summary.course?.title ?: "N/A"}
                       *Batch:* ${summary.batch?.name ?: "N/A"}
-                      *Admission Date:* ${summary.admissionDate}
-                      *Monthly Fee:* ₹${summary.monthlyFee.toInt()}
-                      *Total Billed (${summary.monthsElapsed.size} Months):* ₹${summary.totalBilled.toInt()}
+                      *Admission Month:* ${summary.admissionMonth}
+                      *Standard Monthly Fee:* ₹${summary.standardMonthlyFee.toInt()}
+                      *Monthly Discount Allowed:* ₹${summary.monthlyDiscount.toInt()}
+                      *Net Monthly Fee:* ₹${summary.effectiveMonthlyFee.toInt()}
+                      *Total Payable from Admission (${summary.billedMonthsCount} Months):* ₹${summary.payableFromAdmissionMonth.toInt()}
                       *Total Already Paid (Adjusted):* ₹${summary.totalPaid.toInt()}
                       *Outstanding Due:* ₹${dueAmount.toInt()}
                       *Unpaid Months:* ${summary.unpaidMonths.joinToString { it.monthLabel }}
@@ -294,7 +451,7 @@ fun AdminFeeCollectionTab(
                   },
                   shape = RoundedCornerShape(10.dp),
                   colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                   Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(13.dp))
                   Spacer(modifier = Modifier.width(4.dp))
@@ -512,13 +669,38 @@ fun AdminFeeCollectionTab(
             }
           }
 
-          OutlinedTextField(
-            value = collectAmount,
-            onValueChange = { collectAmount = it },
-            label = { Text("Amount Received (₹) *") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            OutlinedTextField(
+              value = collectAmount,
+              onValueChange = { collectAmount = it },
+              label = { Text("Amount Received (₹) *") },
+              singleLine = true,
+              modifier = Modifier.weight(1.2f)
+            )
+
+            OutlinedTextField(
+              value = collectDiscount,
+              onValueChange = { collectDiscount = it.filter { c -> c.isDigit() || c == '.' } },
+              label = { Text("Discount / Waiver (₹)") },
+              placeholder = { Text("0") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+          }
+
+          if (collectDiscount.isNotBlank() && (collectDiscount.toDoubleOrNull() ?: 0.0) > 0) {
+            OutlinedTextField(
+              value = collectDiscountReason,
+              onValueChange = { collectDiscountReason = it },
+              label = { Text("Discount Concession Reason") },
+              placeholder = { Text("e.g. Merit Concession / Sibling Waiver") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth()
+            )
+          }
 
           OutlinedTextField(
             value = collectMonth,
@@ -567,13 +749,17 @@ fun AdminFeeCollectionTab(
                 val s = students.find { it.id == selectedStudentId }
                 if (s != null) {
                   val amt = collectAmount.toDoubleOrNull() ?: (selectedSummary?.monthlyFee ?: 400.0)
+                  val disc = collectDiscount.toDoubleOrNull() ?: 0.0
+                  val discReason = collectDiscountReason.ifBlank { null }
                   val newPay = repository.submitStudentFeePayment(
                     student = s,
                     months = listOf(collectMonth),
                     amount = amt,
                     mode = collectMode,
                     ref = collectRef.ifBlank { "CSH-DESK" },
-                    remarks = "Collected at Center Counter"
+                    remarks = "Collected at Center Counter",
+                    discount = disc,
+                    discountReason = discReason
                   )
                   // Approve immediately since admin collected it
                   repository.approvePayment(newPay.id)
@@ -590,6 +776,124 @@ fun AdminFeeCollectionTab(
         }
       }
     }
+  }
+
+  // Edit Admission Date & Discount Dialog
+  studentToEditFee?.let { summ ->
+    var editAdmDate by remember(summ) { mutableStateOf(summ.student.admissionDate.ifBlank { "2026-08-15" }) }
+    var editDiscountText by remember(summ) { mutableStateOf(summ.student.monthlyDiscount?.toInt()?.toString() ?: if (summ.monthlyDiscount > 0) summ.monthlyDiscount.toInt().toString() else "") }
+    var editDiscountReason by remember(summ) { mutableStateOf(summ.student.discountReason ?: "Merit Scholarship") }
+    var editOverrideText by remember(summ) { mutableStateOf(summ.student.customMonthlyFeeOverride?.toInt()?.toString() ?: "") }
+
+    AlertDialog(
+      onDismissRequest = { studentToEditFee = null },
+      title = {
+        Column {
+          Text("Edit Admission & Discount", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+          Text("${summ.student.name} • ${summ.course?.title ?: ""}", fontSize = 12.sp, color = SlateTextSecondary)
+        }
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+          Text("1. Admission Date (Determines months elapsed)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+          OutlinedTextField(
+            value = editAdmDate,
+            onValueChange = { editAdmDate = it },
+            label = { Text("Admission Date (YYYY-MM-DD)") },
+            placeholder = { Text("e.g. 2026-08-15") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("2026-08-01" to "August 2026", "2026-09-01" to "September 2026", "2026-10-01" to "October 2026").forEach { (dt, label) ->
+              FilterChip(
+                selected = editAdmDate.startsWith(dt.take(7)),
+                onClick = { editAdmDate = dt },
+                label = { Text(label, fontSize = 9.sp) }
+              )
+            }
+          }
+
+          Text("2. Monthly Discount & Fee Concession", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+          OutlinedTextField(
+            value = editDiscountText,
+            onValueChange = { editDiscountText = it.filter { c -> c.isDigit() || c == '.' } },
+            label = { Text("Monthly Discount Amount (₹)") },
+            placeholder = { Text("e.g. 50 (Standard fee: ₹${summ.standardMonthlyFee.toInt()})") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("0" to "₹0", "50" to "₹50/mo", "100" to "₹100/mo", "150" to "₹150/mo").forEach { (disc, label) ->
+              FilterChip(
+                selected = editDiscountText == disc,
+                onClick = { editDiscountText = disc },
+                label = { Text(label, fontSize = 9.sp) }
+              )
+            }
+          }
+
+          OutlinedTextField(
+            value = editDiscountReason,
+            onValueChange = { editDiscountReason = it },
+            label = { Text("Discount Reason / Concession Type") },
+            placeholder = { Text("Merit Scholarship / Sibling Waiver / Early Bird") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          val previewStd = summ.standardMonthlyFee
+          val previewDisc = editDiscountText.toDoubleOrNull() ?: 0.0
+          val previewNet = maxOf(0.0, previewStd - previewDisc)
+          Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(8.dp)) {
+              Text(
+                text = "Preview: Standard ₹${previewStd.toInt()} - Discount ₹${previewDisc.toInt()} = Net ₹${previewNet.toInt()}/month",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = IndigoPrimary
+              )
+              Text(
+                text = "Dues will be automatically recalculated from ${editAdmDate.take(7)} with adjustments.",
+                fontSize = 10.sp,
+                color = SlateTextSecondary
+              )
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val discVal = editDiscountText.toDoubleOrNull()
+            val overrideVal = editOverrideText.toDoubleOrNull()
+            repository.updateStudentAdmissionAndDiscount(
+              studentId = summ.student.id,
+              newAdmissionDate = editAdmDate.trim(),
+              newMonthlyDiscount = discVal,
+              newCustomFeeOverride = overrideVal,
+              newDiscountReason = editDiscountReason.trim().ifBlank { null }
+            )
+            studentToEditFee = null
+            Toast.makeText(context, "Admission date & discount updated! Dues recalculated.", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+        ) {
+          Text("Save & Recalculate")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { studentToEditFee = null }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 
   selectedReceipt?.let { pay ->
