@@ -45,6 +45,7 @@ fun AdminFeeCollectionTab(
   val payments by repository.payments.collectAsState()
   val centerInfo by repository.centerInfo.collectAsState()
   val admissions by repository.admissions.collectAsState()
+  val discounts by repository.discounts.collectAsState()
 
   var selectedTab by remember { mutableStateOf("history") } // "history" or "dues"
   var showCollectDialog by remember { mutableStateOf(false) }
@@ -53,9 +54,9 @@ fun AdminFeeCollectionTab(
   var studentToEditFee by remember { mutableStateOf<StudentFeeSummary?>(null) }
 
   // Compute student fee summaries: payable per batch/course, duration from admission date, and website-adjusted payments
-  val studentSummaries = remember(students, courses, batches, payments, admissions) {
+  val studentSummaries = remember(students, courses, batches, payments, admissions, discounts) {
     students.map { st ->
-      FeeCalculator.calculateStudentFeeSummary(st, courses, batches, payments, admissions)
+      FeeCalculator.calculateStudentFeeSummary(st, courses, batches, payments, admissions, discounts)
     }
   }
   val studentDuesList = studentSummaries.filter { it.dueAmount > 0 }
@@ -332,7 +333,7 @@ fun AdminFeeCollectionTab(
                     horizontalArrangement = Arrangement.SpaceBetween
                   ) {
                     Text(
-                      text = "Payable from Admission (${summary.admissionMonth}):",
+                      text = "Payable (${summary.admissionMonth} → ${summary.currentMonth}):",
                       fontSize = 11.sp,
                       fontWeight = FontWeight.SemiBold,
                       color = Color(0xFF1E293B)
@@ -345,7 +346,7 @@ fun AdminFeeCollectionTab(
                     )
                   }
                   Text(
-                    text = "${summary.billedMonthsCount} billing months (Gross: ₹${summary.grossBilledFromAdmissionMonth.toInt()} - Discount: ₹${summary.totalDiscountAllowed.toInt()})",
+                    text = "${summary.billedMonthsCount} billing months (${summary.admissionMonth} to ${summary.currentMonth}) • Gross: ₹${summary.grossBilledFromAdmissionMonth.toInt()} - Discount: ₹${summary.totalDiscountAllowed.toInt()}",
                     fontSize = 10.sp,
                     color = SlateTextSecondary
                   )

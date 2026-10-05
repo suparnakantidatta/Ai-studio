@@ -27,6 +27,7 @@ object GoogleSheetSyncService {
     "Courses_Batches" to "563739523",
     "Fee_Transactions" to "154871224",
     "Admissions" to "120081180",
+    "Discounts" to "1447428203",
     "Educators" to "1520472103",
     "Live_Classes" to "1629684060",
     "Class_Recordings" to "863738719",
@@ -89,6 +90,7 @@ object GoogleSheetSyncService {
     val students = parseStudentsTable(dataObj.optJSONArray("Students"), admissions)
     val (courses, batches) = parseCoursesBatchesTable(dataObj.optJSONArray("Courses_Batches"))
     val payments = parsePaymentsTable(dataObj.optJSONArray("Fee_Transactions"))
+    val discounts = parseDiscountsTable(dataObj.optJSONArray("Discounts"))
     val educators = parseEducatorsTable(dataObj.optJSONArray("Educators"))
     val centerInfo = parseCenterOverviewTable(dataObj.optJSONArray("Center_Overview"))
     val adminAccounts = parseAdminsTable(dataObj.optJSONArray("Admin_Credentials"))
@@ -106,6 +108,7 @@ object GoogleSheetSyncService {
       batches = batches,
       payments = payments,
       admissions = admissions,
+      discounts = discounts,
       educators = educators,
       adminAccounts = adminAccounts,
       liveClasses = liveClasses,
@@ -371,6 +374,55 @@ object GoogleSheetSyncService {
     return list
   }
 
+  private fun parseDiscountsTable(array: JSONArray?): List<Discount> {
+    val list = mutableListOf<Discount>()
+    if (array == null || array.length() <= 1) return list
+
+    for (i in 1 until array.length()) {
+      val row = array.optJSONArray(i) ?: continue
+      val id = optCell(row, 0).ifBlank { "disc-$i" }
+      val title = optCell(row, 1).ifBlank { "Fee Concession" }
+      val rawType = optCell(row, 2).lowercase().trim()
+      val type = if (rawType.contains("percent")) "percentage" else "flat"
+      val rawVal = optCell(row, 3).replace("₹", "").replace("%", "").replace(",", "").trim()
+      val value = rawVal.toDoubleOrNull() ?: 250.0
+      val scope = optCell(row, 4).lowercase().trim().ifBlank { "all" }
+      val academicClass = optCell(row, 5).ifBlank { null }
+      val courseId = optCell(row, 6).ifBlank { null }
+      val batchId = optCell(row, 7).ifBlank { null }
+      val studentId = optCell(row, 8).ifBlank { null }
+      val monthsType = optCell(row, 9).lowercase().trim().ifBlank { "all_months" }
+      val selectedMonthsRaw = optCell(row, 10)
+      val selectedMonths = if (selectedMonthsRaw.isNotBlank()) {
+        selectedMonthsRaw.split(",").map { it.trim() }
+      } else null
+      val reason = optCell(row, 11).ifBlank { null }
+      val activeStr = optCell(row, 12).lowercase().trim()
+      val active = activeStr.isBlank() || activeStr == "active" || activeStr == "true" || activeStr == "yes"
+
+      if (id.isBlank() && title.isBlank()) continue
+
+      list.add(
+        Discount(
+          id = id,
+          title = title,
+          type = type,
+          value = value,
+          scope = scope,
+          academicClass = academicClass,
+          courseId = courseId,
+          batchId = batchId,
+          studentId = studentId,
+          applicableMonthsType = monthsType,
+          selectedMonths = selectedMonths,
+          active = active,
+          reason = reason
+        )
+      )
+    }
+    return list
+  }
+
   private fun parseEducatorsTable(array: JSONArray?): List<Educator> {
     val list = mutableListOf<Educator>()
     if (array == null || array.length() <= 1) return list
@@ -507,6 +559,12 @@ object GoogleSheetSyncService {
       parsePaymentsTable(arr)
     } ?: emptyList()
 
+    val discounts = fetchCsvRows("Discounts", GIDS["Discounts"] ?: "1447428203")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseDiscountsTable(arr)
+    } ?: emptyList()
+
     val educators = fetchCsvRows("Educators", GIDS["Educators"] ?: "1520472103")?.let { rows ->
       val arr = JSONArray()
       rows.forEach { r -> arr.put(JSONArray(r)) }
@@ -568,6 +626,7 @@ object GoogleSheetSyncService {
       batches = batches,
       payments = payments,
       admissions = admissions,
+      discounts = discounts,
       educators = educators,
       adminAccounts = admins,
       liveClasses = liveClasses,

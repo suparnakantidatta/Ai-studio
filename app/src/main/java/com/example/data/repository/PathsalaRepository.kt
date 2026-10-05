@@ -10,6 +10,7 @@ import com.example.data.model.Batch
 import com.example.data.model.CenterInfo
 import com.example.data.model.ClassRecording
 import com.example.data.model.Course
+import com.example.data.model.Discount
 import com.example.data.model.Educator
 import com.example.data.model.ExamQuestion
 import com.example.data.model.ExamSubmission
@@ -55,6 +56,9 @@ class PathsalaRepository(private val context: Context) {
 
   private val _admissions = MutableStateFlow(localStore.getAdmissions())
   val admissions: StateFlow<List<AdmissionApplication>> = _admissions.asStateFlow()
+
+  private val _discounts = MutableStateFlow(localStore.getDiscounts())
+  val discounts: StateFlow<List<Discount>> = _discounts.asStateFlow()
 
   private val _liveClasses = MutableStateFlow(localStore.getLiveClasses())
   val liveClasses: StateFlow<List<LiveClassSession>> = _liveClasses.asStateFlow()
@@ -134,6 +138,10 @@ class PathsalaRepository(private val context: Context) {
             localStore.savePayments(it)
           }
           sheetDto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
+          sheetDto.discounts?.let { if (it.isNotEmpty()) {
+            _discounts.value = it
+            localStore.saveDiscounts(it)
+          } }
           sheetDto.liveClasses?.let { if (it.isNotEmpty()) _liveClasses.value = it }
           sheetDto.classRecordings?.let { if (it.isNotEmpty()) _recordings.value = it }
           sheetDto.studyMaterials?.let { if (it.isNotEmpty()) _studyMaterials.value = it }
@@ -178,6 +186,7 @@ class PathsalaRepository(private val context: Context) {
             dto.educators?.let { if (it.isNotEmpty()) _educators.value = it }
             dto.payments?.let { if (it.isNotEmpty()) _payments.value = it }
             dto.admissions?.let { if (it.isNotEmpty()) _admissions.value = it }
+            dto.discounts?.let { if (it.isNotEmpty()) _discounts.value = it }
             dto.liveClasses?.let { if (it.isNotEmpty()) _liveClasses.value = it }
             dto.classRecordings?.let { if (it.isNotEmpty()) _recordings.value = it }
             dto.studyMaterials?.let { if (it.isNotEmpty()) _studyMaterials.value = it }

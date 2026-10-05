@@ -349,4 +349,87 @@ class ExampleRobolectricTest {
     val mos = summary.monthsElapsed.size
     assertEquals(mos * 350.0, summary.payableFromAdmissionMonth, 0.01)
   }
+
+  @Test
+  fun `database discount table rules calculate pending payment and discounts accurately from admission date to current month`() {
+    val student = com.example.data.model.Student(
+      id = "stu-1788672835416",
+      rollNo = "PP-2026-255",
+      name = "Abhinaba Som",
+      mobile = "9647750688",
+      aadhaarNo = "3056 3793 9454",
+      courseId = "course-1788019409876",
+      batchId = "batch-1788019693229",
+      admissionDate = "2026-08-15"
+    )
+
+    val course = com.example.data.model.Course(
+      id = "course-1788019409876",
+      title = "COMPUTER SCIENCE (XI)",
+      code = "COMS-011",
+      monthlyFee = 400.0
+    )
+
+    val batch = com.example.data.model.Batch(
+      id = "batch-1788019693229",
+      name = "MORNING BATCH (COMS-011)",
+      courseId = "course-1788019409876"
+    )
+
+    val dbDiscounts = listOf(
+      com.example.data.model.Discount(
+        id = "disc-all",
+        title = "Center-Wide Concession (Assigned in All Options)",
+        type = "flat",
+        value = 250.0,
+        scope = "all",
+        applicableMonthsType = "all_months",
+        active = true,
+        reason = "Universal academic fee concession assigned to all options"
+      )
+    )
+
+    val admissionPayment = com.example.data.model.FeePayment(
+      id = "pay-adm-1",
+      receiptNo = "REC/2026/ADM-255",
+      studentId = student.id,
+      studentName = student.name,
+      month = "August 2026",
+      monthsCovered = listOf("2026-08"),
+      baseMonthlyFee = 400.0,
+      totalBaseFee = 400.0,
+      totalDiscount = 250.0,
+      finalAmountPaid = 150.0,
+      paymentMode = "UPI",
+      status = "approved",
+      paymentDate = "2026-08-15"
+    )
+
+    val summary = com.example.util.FeeCalculator.calculateStudentFeeSummary(
+      student = student,
+      courses = listOf(course),
+      batches = listOf(batch),
+      allPayments = listOf(admissionPayment),
+      discounts = dbDiscounts
+    )
+
+    assertEquals(400.0, summary.standardMonthlyFee, 0.01)
+    assertEquals(250.0, summary.monthlyDiscount, 0.01)
+    assertEquals(150.0, summary.effectiveMonthlyFee, 0.01)
+    assertEquals("August 2026", summary.admissionMonth)
+    assertTrue("At least 3 billing months elapsed (August, September, October)", summary.monthsElapsed.size >= 3)
+
+    val monthsCount = summary.monthsElapsed.size
+    assertEquals(monthsCount * 400.0, summary.totalGrossBilled, 0.01)
+    assertEquals(monthsCount * 250.0, summary.totalDiscountAllowed, 0.01)
+    assertEquals(monthsCount * 150.0, summary.totalNetBilled, 0.01)
+    assertEquals(150.0, summary.totalPaid, 0.01)
+
+    val expectedDue = (monthsCount - 1) * 150.0
+    assertEquals(expectedDue, summary.dueAmount, 0.01)
+    assertEquals(monthsCount - 1, summary.dueMonthsCount)
+
+    assertTrue(summary.monthsElapsed.first().isPaid)
+    assertTrue(!summary.monthsElapsed[1].isPaid)
+  }
 }

@@ -669,6 +669,41 @@ class LocalDataStore(context: Context) {
       )
     )
 
+    val INITIAL_DISCOUNTS = listOf(
+      Discount(
+        id = "disc-all",
+        title = "Center-Wide Concession (Assigned in All Options)",
+        type = "flat",
+        value = 250.0,
+        scope = "all",
+        applicableMonthsType = "all_months",
+        active = true,
+        reason = "Universal academic fee concession assigned to all options"
+      ),
+      Discount(
+        id = "disc-1",
+        title = "Batch Alpha Early-Bird Concession",
+        type = "flat",
+        value = 200.0,
+        scope = "batch",
+        batchId = "batch-1",
+        applicableMonthsType = "all_months",
+        active = true,
+        reason = "Inaugural coding batch early-bird discount"
+      ),
+      Discount(
+        id = "disc-2",
+        title = "Merit Scholarship - Priyanka Das",
+        type = "percentage",
+        value = 20.0,
+        scope = "student",
+        studentId = "stu-102",
+        applicableMonthsType = "all_months",
+        active = true,
+        reason = "Scored 96.5% in Class 10 Board Exams"
+      )
+    )
+
     val INITIAL_ADMIN = AdminAccount(
       id = "ADM-001",
       username = "admin",
@@ -796,6 +831,10 @@ class LocalDataStore(context: Context) {
   fun getExamSubmissions(): List<ExamSubmission> = getList("submissions", emptyList())
   fun saveExamSubmissions(list: List<ExamSubmission>) = putList("submissions", list)
 
+  // Discounts
+  fun getDiscounts(): List<Discount> = getList("discounts_list", INITIAL_DISCOUNTS)
+  fun saveDiscounts(list: List<Discount>) = putList("discounts_list", list)
+
   // Admin Account
   fun getAdminAccount(): AdminAccount = getObject("admin_account", INITIAL_ADMIN)
   fun saveAdminAccount(admin: AdminAccount) = putObject("admin_account", admin)
@@ -809,6 +848,7 @@ class LocalDataStore(context: Context) {
     dto.educators?.let { saveEducators(it) }
     dto.payments?.let { savePayments(it) }
     dto.admissions?.let { saveAdmissions(it) }
+    dto.discounts?.let { saveDiscounts(it) }
     dto.liveClasses?.let { saveLiveClasses(it) }
     dto.classRecordings?.let { saveRecordings(it) }
     dto.studyMaterials?.let { saveStudyMaterials(it) }
@@ -827,6 +867,7 @@ class LocalDataStore(context: Context) {
       educators = getEducators(),
       payments = getPayments(),
       admissions = getAdmissions(),
+      discounts = getDiscounts(),
       liveClasses = getLiveClasses(),
       classRecordings = getRecordings(),
       studyMaterials = getStudyMaterials(),

@@ -31,6 +31,7 @@ import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
 
 @Composable
 fun AdminStudentsTab(
@@ -40,6 +41,7 @@ fun AdminStudentsTab(
   val students by repository.students.collectAsState()
   val courses by repository.courses.collectAsState()
   val batches by repository.batches.collectAsState()
+  val discounts by repository.discounts.collectAsState()
 
   var searchQuery by remember { mutableStateOf("") }
   var filterStatus by remember { mutableStateOf("all") }
@@ -228,8 +230,8 @@ fun AdminStudentsTab(
                 fontWeight = FontWeight.Bold,
                 color = SlateTextPrimary
               )
-              val stdFee = course?.monthlyFee?.toInt() ?: 400
-              val disc = student.monthlyDiscount?.toInt() ?: if (student.customMonthlyFeeOverride != null && student.customMonthlyFeeOverride < stdFee) (stdFee - student.customMonthlyFeeOverride.toInt()) else 0
+              val stdFee = FeeCalculator.getStandardMonthlyFee(student, courses, batches).toInt()
+              val disc = FeeCalculator.getMonthlyDiscount(student, courses, batches, discounts).toInt()
               val netFee = maxOf(0, stdFee - disc)
               Text(
                 text = "Rate: ₹$stdFee/mo" + (if (disc > 0) " (-₹$disc discount)" else "") + " = ₹$netFee/mo net",

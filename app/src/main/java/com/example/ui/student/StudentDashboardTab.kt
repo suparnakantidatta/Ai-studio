@@ -52,13 +52,14 @@ fun StudentDashboardTab(
   val payments by repository.payments.collectAsState()
   val centerInfo by repository.centerInfo.collectAsState()
   val admissions by repository.admissions.collectAsState()
+  val discounts by repository.discounts.collectAsState()
 
   val studentCourse = courses.find { it.id == student.courseId }
   val studentBatch = batches.find { it.id == student.batchId }
 
   // Dynamic fee calculation as per batch & course, admission date, and website-adjusted payments
-  val feeSummary = remember(student, courses, batches, payments, admissions) {
-    FeeCalculator.calculateStudentFeeSummary(student, courses, batches, payments, admissions)
+  val feeSummary = remember(student, courses, batches, payments, admissions, discounts) {
+    FeeCalculator.calculateStudentFeeSummary(student, courses, batches, payments, admissions, discounts)
   }
 
   val monthlyFee = feeSummary.monthlyFee
@@ -171,7 +172,7 @@ fun StudentDashboardTab(
                 color = Color(0xFF1E3A8A)
               )
               Text(
-                text = "Admitted: ${feeSummary.admissionMonth} (${feeSummary.billedMonthsCount} billing months elapsed)",
+                text = "Admitted: ${feeSummary.admissionMonth} → Current: ${feeSummary.currentMonth} (${feeSummary.billedMonthsCount} months)",
                 fontSize = 10.sp,
                 color = SlateTextSecondary
               )

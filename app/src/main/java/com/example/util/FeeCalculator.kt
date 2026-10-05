@@ -2,6 +2,7 @@ package com.example.util
 
 import com.example.data.model.Batch
 import com.example.data.model.Course
+import com.example.data.model.Discount
 import com.example.data.model.FeePayment
 import com.example.data.model.Student
 import java.util.Calendar
@@ -11,13 +12,14 @@ data class MonthFeeStatus(
   val monthKey: String, // e.g. "2026-08"
   val monthLabel: String, // e.g. "August 2026"
   val standardFee: Double, // e.g. 400.0
-  val discount: Double, // e.g. 50.0
-  val netPayable: Double, // e.g. 350.0
+  val discount: Double, // e.g. 250.0
+  val netPayable: Double, // e.g. 150.0
   val isPaid: Boolean,
   val isPending: Boolean,
   val paidAmount: Double,
   val dueAmount: Double,
-  val matchingPayment: FeePayment? = null
+  val matchingPayment: FeePayment? = null,
+  val discountTitle: String? = null
 ) {
   // Compatibility getter for existing UI components
   val feeAmount: Double get() = if (discount > 0) netPayable else standardFee
@@ -28,21 +30,23 @@ data class StudentFeeSummary(
   val course: Course?,
   val batch: Batch?,
   val standardMonthlyFee: Double, // e.g. 400.0
-  val monthlyDiscount: Double, // e.g. 50.0
-  val effectiveMonthlyFee: Double, // e.g. 350.0
+  val monthlyDiscount: Double, // e.g. 250.0
+  val effectiveMonthlyFee: Double, // e.g. 150.0
   val admissionDate: String, // e.g. "2026-08-16"
   val admissionMonth: String, // e.g. "August 2026"
+  val currentMonth: String = "", // e.g. "October 2026"
   val monthsElapsed: List<MonthFeeStatus>, // All months from admission month to current month
   val totalGrossBilled: Double, // standardMonthlyFee * monthsElapsed.size
   val totalDiscountAllowed: Double, // total discount applied across billing
   val totalNetBilled: Double, // totalGrossBilled - totalDiscountAllowed (Net Payable from Admission Month)
   val totalPaid: Double, // already paid amount adjusted as website
-  val dueAmount: Double, // maxOf(0.0, totalNetBilled - totalPaid)
+  val dueAmount: Double, // maxOf(0.0, totalNetBilled - totalPaid) -> Pending Amount
   val advanceAmount: Double, // maxOf(0.0, totalPaid - totalNetBilled)
   val paidMonthsCount: Int,
   val dueMonthsCount: Int,
   val unpaidMonths: List<MonthFeeStatus>,
-  val payments: List<FeePayment>
+  val payments: List<FeePayment>,
+  val appliedDiscountTitle: String? = null
 ) {
   // Compatibility getters for existing UI
   val monthlyFee: Double get() = effectiveMonthlyFee
@@ -51,6 +55,8 @@ data class StudentFeeSummary(
   val grossBilledFromAdmissionMonth: Double get() = totalGrossBilled
   val totalDiscount: Double get() = totalDiscountAllowed
   val billedMonthsCount: Int get() = monthsElapsed.size
+  val pendingAmount: Double get() = dueAmount
+  val pendingMonthsText: String get() = if (dueMonthsCount > 0) "$dueMonthsCount Months Pending (From $admissionMonth to $currentMonth)" else "All Cleared Up to $currentMonth"
 }
 
 object FeeCalculator {
@@ -58,6 +64,12 @@ object FeeCalculator {
   private val MONTH_NAMES = arrayOf(
     "", "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
+  )
+
+  data class DiscountResolution(
+    val amount: Double,
+    val discount: Discount? = null,
+    val title: String? = null
   )
 
   /**
@@ -76,23 +88,113 @@ object FeeCalculator {
   }
 
   /**
-   * Determine monthly discount for student (override vs standard, or explicit monthly discount).
+   * Resolves the best applicable discount for a student based on:
+   * 1. Student explicit discount / custom fee override
+   * 2. Database discount table matching rules:
+   *    - Active status
+   *    - Target scope (student ID, batch ID, course ID, academic class, or 'all')
+   *    - Applicable months (all_months, or selected_months matching monthKey)
+   *    - Type: percentage vs flat amount
+   */
+  fun resolveDiscount(
+    student: Student,
+    courses: List<Course>,
+    batches: List<Batch>,
+    discounts: List<Discount> = emptyList(),
+    monthKey: String? = null,
+    monthLabel: String? = null
+  ): DiscountResolution {
+    val batch = batches.find { it.id == student.batchId }
+    val course = courses.find { it.id == student.courseId }
+      ?: courses.find { it.id == batch?.courseId }
+      ?: courses.firstOrNull()
+    val standardFee = course?.monthlyFee?.takeIf { it > 0 } ?: 400.0
+
+    // 1. Explicit student-level discount from student record
+    var explicitDiscount = 0.0
+    var explicitTitle: String? = null
+
+    if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
+      explicitDiscount = student.monthlyDiscount
+      explicitTitle = student.discountReason ?: "Student Concession"
+    } else if (student.customMonthlyFeeOverride != null && student.customMonthlyFeeOverride > 0 && student.customMonthlyFeeOverride < standardFee) {
+      val override = student.customMonthlyFeeOverride
+      explicitDiscount = if (override <= standardFee / 2) override else maxOf(0.0, standardFee - override)
+      explicitTitle = student.discountReason ?: "Custom Fee Concession"
+    }
+
+    // 2. Matching discounts from database discount table
+    var bestDbDiscount: Discount? = null
+    var bestDbAmount = 0.0
+
+    for (d in discounts) {
+      if (!d.active) continue
+
+      // Scope match
+      val scopeMatches = when (d.scope.lowercase().trim()) {
+        "student" -> !d.studentId.isNullOrBlank() && d.studentId == student.id
+        "batch" -> !d.batchId.isNullOrBlank() && d.batchId == student.batchId
+        "course" -> !d.courseId.isNullOrBlank() && (d.courseId == student.courseId || d.courseId == course?.id)
+        "class" -> !d.academicClass.isNullOrBlank() && (
+          d.academicClass.equals(student.studentClass, ignoreCase = true) ||
+          d.academicClass.equals(course?.academicClass, ignoreCase = true)
+        )
+        "all" -> true
+        else -> d.scope.isBlank() || d.scope.equals("universal", ignoreCase = true)
+      }
+      if (!scopeMatches) continue
+
+      // Month match
+      val monthMatches = when {
+        d.applicableMonthsType.equals("selected_months", ignoreCase = true) && !d.selectedMonths.isNullOrEmpty() -> {
+          if (monthKey == null && monthLabel == null) true
+          else d.selectedMonths.any { sm ->
+            (monthKey != null && sm.contains(monthKey, ignoreCase = true)) ||
+            (monthLabel != null && sm.contains(monthLabel, ignoreCase = true)) ||
+            (monthKey != null && monthKey.contains(sm, ignoreCase = true))
+          }
+        }
+        else -> true // "all_months"
+      }
+      if (!monthMatches) continue
+
+      // Calculate discount amount
+      val discValue = when (d.type.lowercase().trim()) {
+        "percentage" -> (standardFee * d.value) / 100.0
+        else -> d.value // "flat"
+      }
+
+      if (discValue > bestDbAmount) {
+        bestDbAmount = discValue
+        bestDbDiscount = d
+      }
+    }
+
+    return if (bestDbAmount >= explicitDiscount && bestDbDiscount != null) {
+      DiscountResolution(
+        amount = minOf(standardFee, bestDbAmount),
+        discount = bestDbDiscount,
+        title = bestDbDiscount.title
+      )
+    } else {
+      DiscountResolution(
+        amount = minOf(standardFee, explicitDiscount),
+        discount = null,
+        title = explicitTitle
+      )
+    }
+  }
+
+  /**
+   * Determine monthly discount for student (override vs standard, explicit monthly discount, or database discount table).
    */
   fun getMonthlyDiscount(
     student: Student,
     courses: List<Course>,
-    batches: List<Batch>
+    batches: List<Batch>,
+    discounts: List<Discount> = emptyList()
   ): Double {
-    val standard = getStandardMonthlyFee(student, courses, batches)
-    if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
-      return student.monthlyDiscount
-    }
-    val override = student.customMonthlyFeeOverride
-    if (override != null && override > 0 && override < standard) {
-      // If override is a concession value (e.g. 50 or 100), or net monthly fee (e.g. 350)
-      return if (override <= standard / 2) override else maxOf(0.0, standard - override)
-    }
-    return 0.0
+    return resolveDiscount(student, courses, batches, discounts).amount
   }
 
   /**
@@ -101,10 +203,11 @@ object FeeCalculator {
   fun getMonthlyFee(
     student: Student,
     courses: List<Course>,
-    batches: List<Batch>
+    batches: List<Batch>,
+    discounts: List<Discount> = emptyList()
   ): Double {
     val standard = getStandardMonthlyFee(student, courses, batches)
-    val discount = getMonthlyDiscount(student, courses, batches)
+    val discount = getMonthlyDiscount(student, courses, batches, discounts)
     return maxOf(0.0, standard - discount)
   }
 
@@ -183,16 +286,17 @@ object FeeCalculator {
   /**
    * Calculates comprehensive fee summary for a student:
    * - Standard payable amount as per batch and course
-   * - Discounts calculated (student-level monthly discount + receipt-level discounts)
-   * - Net payable amount calculated from date of admission
-   * - Already paid amount adjusted chronologically as website
+   * - Discounts calculated using database discount table & student concession rules
+   * - Net payable amount calculated from date of admission to current date month
+   * - Pending amount and unpaid months calculated chronologically
    */
   fun calculateStudentFeeSummary(
     student: Student,
     courses: List<Course>,
     batches: List<Batch>,
     allPayments: List<FeePayment>,
-    admissions: List<com.example.data.model.AdmissionApplication> = emptyList()
+    admissions: List<com.example.data.model.AdmissionApplication> = emptyList(),
+    discounts: List<Discount> = emptyList()
   ): StudentFeeSummary {
     val batch = batches.find { it.id == student.batchId }
     val course = courses.find { it.id == student.courseId }
@@ -200,7 +304,8 @@ object FeeCalculator {
       ?: courses.firstOrNull()
 
     val standardMonthlyFee = getStandardMonthlyFee(student, courses, batches)
-    val monthlyDiscount = getMonthlyDiscount(student, courses, batches)
+    val defaultDiscountRes = resolveDiscount(student, courses, batches, discounts)
+    val monthlyDiscount = defaultDiscountRes.amount
     val effectiveMonthlyFee = maxOf(0.0, standardMonthlyFee - monthlyDiscount)
 
     // Check if admissions table has an earlier applied date for this student
@@ -272,26 +377,11 @@ object FeeCalculator {
     val sheetPaid = student.totalPaidInSheet ?: 0.0
     val totalPaid = maxOf(paymentsSum, sheetPaid)
 
-    val receiptLevelDiscounts = approvedPayments.sumOf { it.totalDiscount }
-
     val rawMonths = getMonthsSinceAdmission(effectiveAdmissionStr)
-    val totalGrossBilled = rawMonths.size * standardMonthlyFee
-    val studentMonthlyDiscountsTotal = rawMonths.size * monthlyDiscount
-
-    // Total discount allowed: student monthly discounts for each elapsed month plus any additional receipt concessions
-    val totalDiscountAllowed = if (monthlyDiscount > 0) {
-      val receiptExtraDiscounts = approvedPayments.sumOf { p ->
-        val coveredCount = maxOf(1, p.monthsCovered.size)
-        maxOf(0.0, p.totalDiscount - (coveredCount * monthlyDiscount))
-      }
-      studentMonthlyDiscountsTotal + receiptExtraDiscounts
-    } else {
-      receiptLevelDiscounts
+    val currentMonthLabel = rawMonths.lastOrNull()?.second ?: run {
+      val cal = Calendar.getInstance()
+      "${MONTH_NAMES[cal.get(Calendar.MONTH) + 1]} ${cal.get(Calendar.YEAR)}"
     }
-    val totalNetBilled = maxOf(0.0, totalGrossBilled - totalDiscountAllowed)
-
-    val dueAmount = maxOf(0.0, totalNetBilled - totalPaid)
-    val advanceAmount = maxOf(0.0, totalPaid - totalNetBilled)
 
     // Adjust paid amount across months chronologically (as website does)
     var remainingCredit = totalPaid
@@ -308,9 +398,10 @@ object FeeCalculator {
         p.month.equals(monthKey, ignoreCase = true) || p.month.contains(monthLabel, ignoreCase = true)
       }
 
+      val monthDiscRes = resolveDiscount(student, courses, batches, discounts, monthKey, monthLabel)
       val monthStandardFee = standardMonthlyFee
-      val monthDiscount = monthlyDiscount
-      val monthNetPayable = effectiveMonthlyFee
+      val monthDiscount = monthDiscRes.amount
+      val monthNetPayable = maxOf(0.0, monthStandardFee - monthDiscount)
 
       val isCoveredByCredit = remainingCredit >= monthNetPayable
       val isPartiallyCovered = remainingCredit > 0 && remainingCredit < monthNetPayable
@@ -333,10 +424,23 @@ object FeeCalculator {
           isPending = pendingPayment != null,
           paidAmount = coveredAmount,
           dueAmount = monthDue,
-          matchingPayment = if (isCoveredByCredit || coveredAmount > 0) explicitPayment else null
+          matchingPayment = if (isCoveredByCredit || coveredAmount > 0) explicitPayment else null,
+          discountTitle = monthDiscRes.title
         )
       )
     }
+
+    val totalGrossBilled = monthStatuses.sumOf { it.standardFee }
+    val baseDiscountAllowed = monthStatuses.sumOf { it.discount }
+    val receiptExtraDiscounts = approvedPayments.sumOf { p ->
+      val coveredCount = maxOf(1, p.monthsCovered.size)
+      maxOf(0.0, p.totalDiscount - (coveredCount * monthlyDiscount))
+    }
+    val totalDiscountAllowed = baseDiscountAllowed + receiptExtraDiscounts
+    val totalNetBilled = maxOf(0.0, totalGrossBilled - totalDiscountAllowed)
+
+    val dueAmount = maxOf(0.0, totalNetBilled - totalPaid)
+    val advanceAmount = maxOf(0.0, totalPaid - totalNetBilled)
 
     val paidCount = monthStatuses.count { it.isPaid }
     val unpaidList = monthStatuses.filter { !it.isPaid }
@@ -350,6 +454,7 @@ object FeeCalculator {
       effectiveMonthlyFee = effectiveMonthlyFee,
       admissionDate = effectiveAdmissionStr,
       admissionMonth = admissionMonthLabel,
+      currentMonth = currentMonthLabel,
       monthsElapsed = monthStatuses,
       totalGrossBilled = totalGrossBilled,
       totalDiscountAllowed = totalDiscountAllowed,
@@ -360,7 +465,8 @@ object FeeCalculator {
       paidMonthsCount = paidCount,
       dueMonthsCount = unpaidList.size,
       unpaidMonths = unpaidList,
-      payments = studentPayments
+      payments = studentPayments,
+      appliedDiscountTitle = defaultDiscountRes.title
     )
   }
 }
