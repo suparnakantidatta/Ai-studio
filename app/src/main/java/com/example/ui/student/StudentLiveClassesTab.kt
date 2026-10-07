@@ -1,8 +1,13 @@
 package com.example.ui.student
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +31,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.alarm.ClassAlarmAudioPlayer
+import com.example.alarm.ClassAlarmManager
+import com.example.alarm.ClassNotificationHelper
 import com.example.data.model.ClassRecording
 import com.example.data.model.LiveClassSession
 import com.example.data.model.Student
@@ -43,6 +51,9 @@ fun StudentLiveClassesTab(
   val liveClasses by repository.liveClasses.collectAsState()
   val recordings by repository.recordings.collectAsState()
 
+  val isAlarmRinging by ClassAlarmAudioPlayer.isRinging.collectAsState()
+  val activeRingingTitle by ClassAlarmAudioPlayer.activeAlarmSessionTitle.collectAsState()
+
   var selectedView by remember { mutableStateOf("live") } // "live" or "recordings"
 
   // Filter for student's batch, course or all-batch sessions
@@ -52,10 +63,34 @@ fun StudentLiveClassesTab(
   }
   val activeLive = studentLive.filter { it.status == "live" }
   val upcomingLive = studentLive.filter { it.status == "scheduled" }
+  val postponedLive = studentLive.filter { it.status == "postponed" }
 
   val studentRecordings = recordings.filter {
     it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
     it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  }
+
+  // Request notifications permission on API 33+ and sync alarms
+  val permissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+  ) { isGranted ->
+    if (isGranted) {
+      Toast.makeText(context, "Class alarms & notifications enabled!", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  LaunchedEffect(Unit) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    ClassNotificationHelper.createNotificationChannels(context)
+    ClassAlarmManager.autoScheduleAlarmsForStudent(context, upcomingLive)
+    ClassAlarmManager.checkAndNotifyPostponedClasses(context, studentLive)
+  }
+
+  // Auto alert if postponed classes change
+  LaunchedEffect(studentLive) {
+    ClassAlarmManager.checkAndNotifyPostponedClasses(context, studentLive)
   }
 
   LazyColumn(
@@ -127,6 +162,187 @@ fun StudentLiveClassesTab(
     }
 
     if (selectedView == "live") {
+      // 0. ACTIVE ALARM RINGING HERO ALERT
+      if (isAlarmRinging) {
+        item {
+          Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF7F1D1D)),
+            border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFEF4444)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(
+              modifier = Modifier.padding(18.dp),
+              verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  Icon(
+                    Icons.Default.NotificationsActive,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                  )
+                  Text(
+                    text = "⏰ CLASS ALARM RINGING NOW!",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp
+                  )
+                }
+                Surface(color = Color(0xFFEF4444), shape = RoundedCornerShape(8.dp)) {
+                  Text(
+                    text = "ON TIME",
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+              }
+
+              Text(
+                text = activeRingingTitle ?: "Your scheduled live classroom is starting now!",
+                color = Color(0xFFFEE2E2),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+              )
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Button(
+                  onClick = {
+                    ClassAlarmAudioPlayer.stopAlarm(context)
+                    Toast.makeText(context, "Alarm stopped", Toast.LENGTH_SHORT).show()
+                  },
+                  shape = RoundedCornerShape(10.dp),
+                  colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                ) {
+                  Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFF7F1D1D), modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Stop Alarm", color = Color(0xFF7F1D1D), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 0.5. POSTPONED CLASSES NOTICE BANNER
+      if (postponedLive.isNotEmpty()) {
+        item {
+          Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFF59E0B)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(
+              modifier = Modifier.padding(16.dp),
+              verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Icon(
+                  Icons.Default.Warning,
+                  contentDescription = null,
+                  tint = Color(0xFFD97706),
+                  modifier = Modifier.size(22.dp)
+                )
+                Text(
+                  text = "Postponed Classes Notice (${postponedLive.size})",
+                  fontWeight = FontWeight.Black,
+                  fontSize = 15.sp,
+                  color = Color(0xFF92400E)
+                )
+              }
+
+              postponedLive.forEach { session ->
+                Surface(
+                  shape = RoundedCornerShape(12.dp),
+                  color = Color.White,
+                  border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                  ) {
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Text(
+                        text = session.title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = Color(0xFF78350F)
+                      )
+                      Surface(color = Color(0xFFFEF3C7), shape = RoundedCornerShape(6.dp)) {
+                        Text(
+                          text = "POSTPONED",
+                          color = Color(0xFFB45309),
+                          fontSize = 9.sp,
+                          fontWeight = FontWeight.Black,
+                          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                      }
+                    }
+
+                    Text(
+                      text = "Reason: ${session.postponeReason ?: "Faculty has postponed this session"}",
+                      fontSize = 12.sp,
+                      color = Color(0xFF92400E)
+                    )
+
+                    if (!session.rescheduledDate.isNullOrBlank()) {
+                      Text(
+                        text = "Rescheduled to: ${session.rescheduledDate} ${session.rescheduledTime ?: ""}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = IndigoPrimary
+                      )
+                    }
+
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      horizontalArrangement = Arrangement.End,
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      OutlinedButton(
+                        onClick = {
+                          ClassAlarmManager.triggerPostponedAlert(context, session)
+                          Toast.makeText(context, "Postpone alarm alert sound ringing!", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                      ) {
+                        Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Ring Alarm Sound", fontSize = 11.sp, color = Color(0xFFB45309), fontWeight = FontWeight.Bold)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // 1. ACTIVE LIVE NOW HERO CARD
       if (activeLive.isNotEmpty()) {
         item {
@@ -232,6 +448,44 @@ fun StudentLiveClassesTab(
         )
       }
 
+      if (upcomingLive.isNotEmpty()) {
+        item {
+          Surface(
+            color = Color(0xFFEFF6FF),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                Icon(Icons.Default.AccessAlarm, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                Text("Alarms Set for All Live Classes", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E3A8A))
+              }
+
+              TextButton(
+                onClick = {
+                  upcomingLive.firstOrNull()?.let { firstSession ->
+                    ClassAlarmManager.triggerTestAlarm(context, firstSession)
+                    Toast.makeText(context, "Testing alarm! Ringing on-time sound & notification.", Toast.LENGTH_SHORT).show()
+                  }
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+              ) {
+                Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Test Alarm Now", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+              }
+            }
+          }
+        }
+      }
+
       if (upcomingLive.isEmpty()) {
         item {
           Card(
@@ -255,6 +509,10 @@ fun StudentLiveClassesTab(
         }
       } else {
         items(upcomingLive) { session ->
+          var isAlarmOn by remember(session.id) {
+            mutableStateOf(ClassAlarmManager.isAlarmSet(context, session.id))
+          }
+
           Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -270,7 +528,46 @@ fun StudentLiveClassesTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                StatusBadge(status = session.status)
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                  StatusBadge(status = session.status)
+                  Surface(
+                    color = if (isAlarmOn) Color(0xFFDCFCE7) else Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.clickable {
+                      val newState = !isAlarmOn
+                      if (newState) {
+                        ClassAlarmManager.setAlarmForClass(context, session)
+                        Toast.makeText(context, "Alarm set for ${session.startTime} on ${session.scheduledDate}", Toast.LENGTH_SHORT).show()
+                      } else {
+                        ClassAlarmManager.cancelAlarmForClass(context, session)
+                        Toast.makeText(context, "Alarm disabled", Toast.LENGTH_SHORT).show()
+                      }
+                      isAlarmOn = newState
+                    }
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                      Icon(
+                        if (isAlarmOn) Icons.Default.AlarmOn else Icons.Default.Alarm,
+                        contentDescription = null,
+                        tint = if (isAlarmOn) EmeraldSuccess else SlateTextSecondary,
+                        modifier = Modifier.size(12.dp)
+                      )
+                      Text(
+                        text = if (isAlarmOn) "Alarm ON" else "Set Alarm",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isAlarmOn) EmeraldSuccess else SlateTextSecondary
+                      )
+                    }
+                  }
+                }
                 Text(
                   text = session.scheduledDate,
                   fontSize = 11.sp,
@@ -306,18 +603,34 @@ fun StudentLiveClassesTab(
                   fontFamily = FontFamily.Monospace
                 )
 
-                if (!session.meetingUrl.isNullOrBlank()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                   OutlinedButton(
                     onClick = {
-                      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(session.meetingUrl))
-                      context.startActivity(intent)
+                      ClassAlarmManager.triggerTestAlarm(context, session)
+                      Toast.makeText(context, "Alarm ringing! Notification & Sound activated.", Toast.LENGTH_SHORT).show()
                     },
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                   ) {
-                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Class Link", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Test Alarm", fontSize = 11.sp)
+                  }
+
+                  if (!session.meetingUrl.isNullOrBlank()) {
+                    Button(
+                      onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(session.meetingUrl))
+                        context.startActivity(intent)
+                      },
+                      shape = RoundedCornerShape(10.dp),
+                      colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                      Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
+                      Spacer(modifier = Modifier.width(3.dp))
+                      Text("Class Link", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                   }
                 }
               }

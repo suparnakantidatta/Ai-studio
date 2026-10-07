@@ -659,6 +659,7 @@ object GoogleSheetSyncService {
       val platform = optCell(row, 11).ifBlank { "google_meet" }
       val meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" }
       val recordingAvailable = optCell(row, 13).contains("yes", ignoreCase = true)
+      val postponeReason = optCell(row, 14).ifBlank { optCell(row, 15) }.ifBlank { null }
 
       list.add(
         LiveClassSession(
@@ -676,7 +677,8 @@ object GoogleSheetSyncService {
           status = status,
           platform = platform,
           meetingUrl = meetingUrl,
-          isRecordingAvailable = recordingAvailable
+          isRecordingAvailable = recordingAvailable,
+          postponeReason = postponeReason
         )
       )
     }

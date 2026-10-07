@@ -142,7 +142,13 @@ class PathsalaRepository(private val context: Context) {
             _discounts.value = it
             localStore.saveDiscounts(it)
           } }
-          sheetDto.liveClasses?.let { if (it.isNotEmpty()) _liveClasses.value = it }
+          sheetDto.liveClasses?.let {
+            if (it.isNotEmpty()) {
+              _liveClasses.value = it
+              localStore.saveLiveClasses(it)
+              com.example.alarm.ClassAlarmManager.checkAndNotifyPostponedClasses(context, it)
+            }
+          }
           sheetDto.classRecordings?.let { if (it.isNotEmpty()) _recordings.value = it }
           sheetDto.studyMaterials?.let { if (it.isNotEmpty()) _studyMaterials.value = it }
           sheetDto.exams?.let { if (it.isNotEmpty()) _exams.value = it }
@@ -836,6 +842,64 @@ class PathsalaRepository(private val context: Context) {
         _connectionStatus.value = "Live Class Status Synced"
       } catch (e: Exception) {
         android.util.Log.e("PathsalaRepository", "Sync live class status error: ${e.message}")
+      }
+    }
+  }
+
+  fun postponeLiveClass(
+    sessionId: String,
+    postponeReason: String? = "Postponed by Faculty",
+    newDate: String? = null,
+    newStartTime: String? = null,
+    newEndTime: String? = null
+  ) {
+    var targetSession: LiveClassSession? = null
+    val updated = _liveClasses.value.map { session ->
+      if (session.id == sessionId) {
+        val modified = session.copy(
+          status = "postponed",
+          postponeReason = postponeReason,
+          rescheduledDate = newDate,
+          rescheduledTime = newStartTime,
+          scheduledDate = newDate ?: session.scheduledDate,
+          startTime = newStartTime ?: session.startTime,
+          endTime = newEndTime ?: session.endTime
+        )
+        targetSession = modified
+        modified
+      } else {
+        session
+      }
+    }
+    _liveClasses.value = updated
+    localStore.saveLiveClasses(updated)
+
+    // Trigger immediate postponed alarm & notification alert
+    targetSession?.let {
+      com.example.alarm.ClassAlarmManager.triggerPostponedAlert(context, it)
+    }
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushLiveClassesTable(updated)
+        _connectionStatus.value = "Postponed Class Synced to Google Sheet"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync postpone error: ${e.message}")
+      }
+    }
+  }
+
+  fun updateLiveClass(session: LiveClassSession) {
+    val updated = _liveClasses.value.map { if (it.id == session.id) session else it }
+    _liveClasses.value = updated
+    localStore.saveLiveClasses(updated)
+
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushLiveClassesTable(updated)
+        _connectionStatus.value = "Updated Live Class Synced"
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Sync update error: ${e.message}")
       }
     }
   }

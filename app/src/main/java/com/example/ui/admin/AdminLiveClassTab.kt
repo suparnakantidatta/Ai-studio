@@ -9,8 +9,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -50,6 +52,8 @@ fun AdminLiveClassTab(
   var showScheduleDialog by remember { mutableStateOf(false) }
   var showCreateExamDialog by remember { mutableStateOf(false) }
   var showAddMaterialDialog by remember { mutableStateOf(false) }
+  var sessionToPostpone by remember { mutableStateOf<LiveClassSession?>(null) }
+  var sessionToEdit by remember { mutableStateOf<LiveClassSession?>(null) }
 
   // Delete confirmation targets
   var sessionToDelete by remember { mutableStateOf<LiveClassSession?>(null) }
@@ -59,13 +63,21 @@ fun AdminLiveClassTab(
 
   // Live Class form states
   var sessionTitle by remember { mutableStateOf("") }
-  var sessionSubject by remember { mutableStateOf("Computer Science & Coding") }
-  var sessionClass by remember { mutableStateOf("Class 10 (Secondary)") }
-  var sessionDate by remember { mutableStateOf("2026-09-29") }
-  var sessionStartTime by remember { mutableStateOf("05:00 PM") }
-  var sessionEndTime by remember { mutableStateOf("06:30 PM") }
+  var sessionSubject by remember { mutableStateOf("Computer Science") }
+  var sessionClass by remember { mutableStateOf("Class 11") }
+  var sessionCourseId by remember { mutableStateOf(courses.firstOrNull()?.id ?: "") }
+  var sessionBatchId by remember { mutableStateOf(batches.firstOrNull()?.id ?: "") }
+  var sessionDate by remember { mutableStateOf("2026-10-10") }
+  var sessionStartTime by remember { mutableStateOf("09:00 AM") }
+  var sessionEndTime by remember { mutableStateOf("11:00 AM") }
   var sessionEducator by remember { mutableStateOf("Er. Suparna Kanti Datta") }
-  var sessionMeetingUrl by remember { mutableStateOf("https://meet.google.com/new") }
+  var sessionPlatform by remember { mutableStateOf("in_app") }
+  var sessionMeetingUrl by remember { mutableStateOf("") }
+
+  // Postpone form states
+  var postponeReasonText by remember { mutableStateOf("Faculty unavailable due to academic board meeting") }
+  var postponeNewDateText by remember { mutableStateOf("") }
+  var postponeNewTimeText by remember { mutableStateOf("") }
 
   // Exam form states
   var examCode by remember { mutableStateOf("EXAM-${(100..999).random()}") }
@@ -227,6 +239,37 @@ fun AdminLiveClassTab(
                     fontWeight = FontWeight.SemiBold
                   )
 
+                  if (session.status == "postponed") {
+                    Surface(
+                      color = Color(0xFFFEF3C7),
+                      shape = RoundedCornerShape(8.dp),
+                      modifier = Modifier.fillMaxWidth()
+                    ) {
+                      Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                      ) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
+                        Column {
+                          Text(
+                            text = "POSTPONED: ${session.postponeReason ?: "By Faculty"}",
+                            color = Color(0xFFB45309),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                          )
+                          if (!session.rescheduledDate.isNullOrBlank()) {
+                            Text(
+                              text = "Rescheduled to: ${session.rescheduledDate} ${session.rescheduledTime ?: ""}",
+                              color = Color(0xFF92400E),
+                              fontSize = 10.sp
+                            )
+                          }
+                        }
+                      }
+                    }
+                  }
+
                   Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -239,7 +282,10 @@ fun AdminLiveClassTab(
                       fontFamily = FontFamily.Monospace
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                      horizontalArrangement = Arrangement.spacedBy(6.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
                       if (session.status == "scheduled") {
                         Button(
                           onClick = {
@@ -248,11 +294,67 @@ fun AdminLiveClassTab(
                           },
                           shape = RoundedCornerShape(10.dp),
                           colors = ButtonDefaults.buttonColors(containerColor = RoseLive),
-                          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                          Icon(Icons.Default.Radio, contentDescription = null, modifier = Modifier.size(14.dp))
-                          Spacer(modifier = Modifier.width(4.dp))
+                          Icon(Icons.Default.Radio, contentDescription = null, modifier = Modifier.size(13.dp))
+                          Spacer(modifier = Modifier.width(3.dp))
                           Text("Go Live", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                          onClick = {
+                            sessionToPostpone = session
+                            postponeReasonText = session.postponeReason ?: "Faculty unavailable due to academic board meeting"
+                            postponeNewDateText = session.scheduledDate
+                            postponeNewTimeText = session.startTime
+                          },
+                          shape = RoundedCornerShape(10.dp),
+                          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                          Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(13.dp))
+                          Spacer(modifier = Modifier.width(3.dp))
+                          Text("Postpone", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                          onClick = {
+                            com.example.alarm.ClassAlarmManager.triggerTestAlarm(context, session)
+                            Toast.makeText(context, "Alarm & Notification tested!", Toast.LENGTH_SHORT).show()
+                          },
+                          shape = RoundedCornerShape(10.dp),
+                          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                          Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
+                          Spacer(modifier = Modifier.width(2.dp))
+                          Text("Alarm", fontSize = 10.sp)
+                        }
+                      } else if (session.status == "postponed") {
+                        Button(
+                          onClick = {
+                            sessionToPostpone = session
+                            postponeReasonText = session.postponeReason ?: ""
+                            postponeNewDateText = session.scheduledDate
+                            postponeNewTimeText = session.startTime
+                          },
+                          shape = RoundedCornerShape(10.dp),
+                          colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                          Text("Reschedule", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                          onClick = {
+                            com.example.alarm.ClassAlarmManager.triggerPostponedAlert(context, session)
+                            Toast.makeText(context, "Postponed alert sound & notification sent!", Toast.LENGTH_SHORT).show()
+                          },
+                          shape = RoundedCornerShape(10.dp),
+                          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                          Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color(0xFFD97706))
+                          Spacer(modifier = Modifier.width(2.dp))
+                          Text("Alert", fontSize = 10.sp)
                         }
                       } else if (session.status == "live") {
                         Button(
@@ -275,7 +377,7 @@ fun AdminLiveClassTab(
                             context.startActivity(intent)
                           },
                           shape = RoundedCornerShape(10.dp),
-                          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                           Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
                         }
@@ -697,30 +799,145 @@ fun AdminLiveClassTab(
       Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        modifier = Modifier.padding(16.dp)
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(16.dp)
       ) {
         Column(
-          modifier = Modifier.padding(18.dp),
+          modifier = Modifier
+            .padding(18.dp)
+            .verticalScroll(rememberScrollState()),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          Text("Schedule Live Class", fontWeight = FontWeight.Black, fontSize = 17.sp)
+          Text("Set Class Schedule", fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+          Text("Schedule live classroom broadcast and sync with live_class database table", fontSize = 11.sp, color = SlateTextSecondary)
+
+          // Course Selector Chips
+          if (courses.isNotEmpty()) {
+            Text("Select Target Course:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              courses.take(3).forEach { c ->
+                val isSel = sessionCourseId == c.id
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = if (isSel) IndigoPrimary else Color(0xFFF1F5F9),
+                  modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                      sessionCourseId = c.id
+                      sessionClass = c.academicClass
+                      val matchingBatch = batches.find { it.courseId == c.id }
+                      if (matchingBatch != null) sessionBatchId = matchingBatch.id
+                      sessionTitle = "${c.title} - ${matchingBatch?.name ?: "Live Session"}"
+                    }
+                ) {
+                  Text(
+                    text = c.code.ifBlank { c.title.take(10) },
+                    color = if (isSel) Color.White else SlateTextPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                    maxLines = 1
+                  )
+                }
+              }
+            }
+          }
 
           OutlinedTextField(
             value = sessionTitle,
             onValueChange = { sessionTitle = it },
             label = { Text("Session Title *") },
-            placeholder = { Text("e.g. Python OOP & Algorithms") },
+            placeholder = { Text("e.g. COMPUTER SCIENCE (XI) - MORNING BATCH") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
           )
 
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            OutlinedTextField(
+              value = sessionClass,
+              onValueChange = { sessionClass = it },
+              label = { Text("Class") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+              value = sessionSubject,
+              onValueChange = { sessionSubject = it },
+              label = { Text("Subject") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+          }
+
           OutlinedTextField(
-            value = sessionSubject,
-            onValueChange = { sessionSubject = it },
-            label = { Text("Subject / Domain *") },
+            value = sessionDate,
+            onValueChange = { sessionDate = it },
+            label = { Text("Scheduled Date (YYYY-MM-DD) *") },
+            placeholder = { Text("2026-10-10") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
           )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            OutlinedTextField(
+              value = sessionStartTime,
+              onValueChange = { sessionStartTime = it },
+              label = { Text("Start Time *") },
+              placeholder = { Text("09:00 AM") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+              value = sessionEndTime,
+              onValueChange = { sessionEndTime = it },
+              label = { Text("End Time *") },
+              placeholder = { Text("11:00 AM") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+          }
+
+          // Quick Time Presets
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            listOf(
+              "09:00 AM - 11:00 AM" to ("09:00 AM" to "11:00 AM"),
+              "11:00 AM - 01:00 PM" to ("11:00 AM" to "01:00 PM"),
+              "07:00 PM - 09:00 PM" to ("07:00 PM" to "09:00 PM")
+            ).forEach { (label, times) ->
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color(0xFFF8FAFC),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SlateBorder),
+                modifier = Modifier
+                  .weight(1f)
+                  .clickable {
+                    sessionStartTime = times.first
+                    sessionEndTime = times.second
+                  }
+              ) {
+                Text(
+                  text = label.split(" - ")[0],
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = SlateTextSecondary,
+                  modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp)
+                )
+              }
+            }
+          }
 
           OutlinedTextField(
             value = sessionEducator,
@@ -730,10 +947,41 @@ fun AdminLiveClassTab(
             modifier = Modifier.fillMaxWidth()
           )
 
+          // Delivery Platform
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            listOf(
+              "in_app" to "In-App Live",
+              "google_meet" to "Google Meet",
+              "zoom" to "Zoom"
+            ).forEach { (plat, label) ->
+              val isSel = sessionPlatform == plat
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isSel) IndigoPrimary else Color(0xFFF1F5F9),
+                modifier = Modifier
+                  .weight(1f)
+                  .clickable { sessionPlatform = plat }
+              ) {
+                Text(
+                  text = label,
+                  color = if (isSel) Color.White else SlateTextPrimary,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                  maxLines = 1
+                )
+              }
+            }
+          }
+
           OutlinedTextField(
             value = sessionMeetingUrl,
             onValueChange = { sessionMeetingUrl = it },
-            label = { Text("Google Meet or Stream URL") },
+            label = { Text("Meeting Link / Room ID (Optional)") },
+            placeholder = { Text("https://meet.google.com/new") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
           )
@@ -751,27 +999,180 @@ fun AdminLiveClassTab(
               onClick = {
                 if (sessionTitle.isNotBlank()) {
                   val newSession = LiveClassSession(
-                    id = "live-${System.currentTimeMillis()}",
+                    id = "live-${System.currentTimeMillis()}-${(100..999).random()}",
                     title = sessionTitle,
                     academicClass = sessionClass,
                     targetClass = sessionClass,
                     subject = sessionSubject,
+                    courseId = sessionCourseId.ifBlank { "course-1788019409876" },
+                    batchId = sessionBatchId.ifBlank { "batch-1788019693229" },
                     educatorName = sessionEducator,
                     scheduledDate = sessionDate,
                     startTime = sessionStartTime,
                     endTime = sessionEndTime,
                     status = "scheduled",
-                    platform = "google_meet",
-                    meetingUrl = sessionMeetingUrl
+                    platform = sessionPlatform,
+                    meetingUrl = sessionMeetingUrl.ifBlank { null }
                   )
                   repository.scheduleLiveClass(newSession)
                   showScheduleDialog = false
-                  Toast.makeText(context, "Live class scheduled & saved to Google Sheets!", Toast.LENGTH_SHORT).show()
+                  Toast.makeText(context, "Class scheduled & synced to live_class table!", Toast.LENGTH_SHORT).show()
                 }
               },
               colors = ButtonDefaults.buttonColors(containerColor = RoseLive)
             ) {
-              Text("Schedule")
+              Text("Save & Schedule")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ==================== POSTPONE LIVE CLASS DIALOG ====================
+  sessionToPostpone?.let { targetSession ->
+    Dialog(onDismissRequest = { sessionToPostpone = null }) {
+      Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(16.dp)
+      ) {
+        Column(
+          modifier = Modifier
+            .padding(18.dp)
+            .verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(24.dp))
+            Text("Postpone Live Class", fontWeight = FontWeight.Black, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
+          }
+
+          Text(
+            text = targetSession.title,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            color = IndigoPrimary
+          )
+          Text(
+            text = "Currently scheduled: ${targetSession.scheduledDate} • ${targetSession.startTime}",
+            fontSize = 11.sp,
+            color = SlateTextSecondary,
+            fontFamily = FontFamily.Monospace
+          )
+
+          OutlinedTextField(
+            value = postponeReasonText,
+            onValueChange = { postponeReasonText = it },
+            label = { Text("Reason for Postponement *") },
+            placeholder = { Text("e.g. Faculty unavailable / Board Exam Preparation") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2
+          )
+
+          // Quick Preset Reasons
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            listOf(
+              "Faculty Unavailable",
+              "Holiday / Festival",
+              "Rescheduled Next Week"
+            ).forEach { reasonPreset ->
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color(0xFFFEF3C7),
+                modifier = Modifier
+                  .weight(1f)
+                  .clickable { postponeReasonText = reasonPreset }
+              ) {
+                Text(
+                  text = reasonPreset,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color(0xFF92400E),
+                  modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp)
+                )
+              }
+            }
+          }
+
+          Text("Rescheduled Timing (Optional):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            OutlinedTextField(
+              value = postponeNewDateText,
+              onValueChange = { postponeNewDateText = it },
+              label = { Text("New Date") },
+              placeholder = { Text("2026-10-15") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+              value = postponeNewTimeText,
+              onValueChange = { postponeNewTimeText = it },
+              label = { Text("New Time") },
+              placeholder = { Text("09:00 AM") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+          }
+
+          Surface(
+            color = Color(0xFFEFF6FF),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+              Text(
+                text = "When confirmed, a notification will be sent and an alarm alert will ring on students' devices.",
+                fontSize = 11.sp,
+                color = Color(0xFF1E3A8A)
+              )
+            }
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            TextButton(onClick = { sessionToPostpone = null }) {
+              Text("Cancel")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+              onClick = {
+                val reason = postponeReasonText.ifBlank { "Postponed by Faculty" }
+                val newDate = postponeNewDateText.trim().ifBlank { null }
+                val newTime = postponeNewTimeText.trim().ifBlank { null }
+
+                repository.postponeLiveClass(
+                  sessionId = targetSession.id,
+                  postponeReason = reason,
+                  newDate = newDate,
+                  newStartTime = newTime
+                )
+                sessionToPostpone = null
+                Toast.makeText(context, "Class postponed! Alarm & Notification triggered for students.", Toast.LENGTH_LONG).show()
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
+            ) {
+              Text("Confirm Postpone & Alert")
             }
           }
         }

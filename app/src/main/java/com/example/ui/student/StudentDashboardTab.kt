@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import com.example.alarm.ClassAlarmAudioPlayer
+import com.example.alarm.ClassAlarmManager
 import com.example.data.model.FeePayment
 import com.example.data.model.Student
 import com.example.data.repository.PathsalaRepository
@@ -53,6 +55,17 @@ fun StudentDashboardTab(
   val centerInfo by repository.centerInfo.collectAsState()
   val admissions by repository.admissions.collectAsState()
   val discounts by repository.discounts.collectAsState()
+  val liveClasses by repository.liveClasses.collectAsState()
+
+  val isAlarmRinging by ClassAlarmAudioPlayer.isRinging.collectAsState()
+  val activeRingingTitle by ClassAlarmAudioPlayer.activeAlarmSessionTitle.collectAsState()
+
+  val studentLive = liveClasses.filter {
+    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
+    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  }
+  val postponedLive = studentLive.filter { it.status == "postponed" }
+  val nextLive = studentLive.firstOrNull { it.status == "scheduled" || it.status == "live" }
 
   val studentCourse = courses.find { it.id == student.courseId }
   val studentBatch = batches.find { it.id == student.batchId }
@@ -79,6 +92,159 @@ fun StudentDashboardTab(
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
+    // 0. Active Alarm Ringing Banner
+    if (isAlarmRinging) {
+      item {
+        Card(
+          shape = RoundedCornerShape(18.dp),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF7F1D1D)),
+          border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFEF4444)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.weight(1f)
+            ) {
+              Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+              Column {
+                Text("⏰ CLASS ALARM RINGING NOW!", color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                Text(activeRingingTitle ?: "Live class is starting right now!", color = Color(0xFFFEE2E2), fontSize = 11.sp, maxLines = 1)
+              }
+            }
+
+            Button(
+              onClick = {
+                ClassAlarmAudioPlayer.stopAlarm(context)
+                Toast.makeText(context, "Alarm stopped", Toast.LENGTH_SHORT).show()
+              },
+              shape = RoundedCornerShape(8.dp),
+              colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+              Text("Stop", color = Color(0xFF7F1D1D), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+          }
+        }
+      }
+    }
+
+    // 0.5. Postponed Class Notice Banner
+    if (postponedLive.isNotEmpty()) {
+      item {
+        val firstPostponed = postponedLive.first()
+        Card(
+          shape = RoundedCornerShape(18.dp),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+          border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFF59E0B)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.weight(1f)
+            ) {
+              Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(22.dp))
+              Column {
+                Text(
+                  text = "CLASS POSTPONED: ${firstPostponed.title}",
+                  color = Color(0xFF92400E),
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 12.sp,
+                  maxLines = 1
+                )
+                Text(
+                  text = "Reason: ${firstPostponed.postponeReason ?: "Faculty has postponed this class"}",
+                  color = Color(0xFFB45309),
+                  fontSize = 11.sp,
+                  maxLines = 1
+                )
+              }
+            }
+
+            OutlinedButton(
+              onClick = {
+                ClassAlarmManager.triggerPostponedAlert(context, firstPostponed)
+                Toast.makeText(context, "Postponed alert sound ringing!", Toast.LENGTH_SHORT).show()
+              },
+              shape = RoundedCornerShape(8.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+              Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(13.dp))
+              Spacer(modifier = Modifier.width(3.dp))
+              Text("Alert", fontSize = 10.sp, color = Color(0xFFB45309), fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+    }
+
+    // 0.8. Next Scheduled Class Alarm Indicator
+    if (nextLive != null) {
+      item {
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = Color(0xFFF0FDF4),
+          border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.weight(1f)
+            ) {
+              Icon(Icons.Default.AlarmOn, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(20.dp))
+              Column {
+                Text(
+                  text = "Live Class: ${nextLive.title}",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF166534),
+                  maxLines = 1
+                )
+                Text(
+                  text = "${nextLive.scheduledDate} • ${nextLive.startTime} • Alarm Set on Time ⏰",
+                  fontSize = 11.sp,
+                  color = Color(0xFF15803D)
+                )
+              }
+            }
+
+            TextButton(
+              onClick = {
+                ClassAlarmManager.triggerTestAlarm(context, nextLive)
+                Toast.makeText(context, "Testing alarm sound & notification!", Toast.LENGTH_SHORT).show()
+              },
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+              Text("Test", fontSize = 11.sp, color = EmeraldSuccess, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+    }
+
     // Student Enrolled Card Banner
     item {
       Card(
