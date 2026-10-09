@@ -69,15 +69,22 @@ object ClassNotificationHelper {
   }
 
   /**
-   * Shows a heads-up alarm notification when a scheduled class starts on time.
+   * Shows a heads-up alarm notification when a scheduled class starts on time,
+   * displaying complete class details fetched from the database.
    */
   fun showLiveClassAlarmNotification(
     context: Context,
     sessionId: String,
     title: String,
+    academicClass: String? = null,
     subject: String,
     educator: String,
-    meetingUrl: String?
+    scheduledDate: String? = null,
+    startTime: String? = null,
+    endTime: String? = null,
+    platform: String? = null,
+    meetingUrl: String? = null,
+    batchName: String? = null
   ) {
     createNotificationChannels(context)
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -113,13 +120,33 @@ object ClassNotificationHelper {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
+    val classTag = academicClass?.ifBlank { null } ?: "Class 12"
+    val timeTag = listOfNotNull(startTime, endTime?.let { "to $it" }).joinToString(" ")
+    val dateTimeDisplay = listOfNotNull(scheduledDate, timeTag.ifBlank { null }).joinToString(" • ")
+    val platformDisplay = platform?.replace("_", " ")?.uppercase() ?: "ONLINE LIVE"
+
+    val bigDetails = buildString {
+      append("⏰ LIVE CLASS ALARM STARTING ON TIME!\n")
+      append("• Class Standard: $classTag\n")
+      append("• Subject: $subject\n")
+      append("• Topic: $title\n")
+      append("• Faculty / Educator: $educator\n")
+      if (dateTimeDisplay.isNotBlank()) append("• Schedule: $dateTimeDisplay\n")
+      append("• Delivery Mode: $platformDisplay\n")
+      if (!batchName.isNullOrBlank()) append("• Batch: $batchName\n")
+      if (!meetingUrl.isNullOrBlank()) append("• Room Link: $meetingUrl\n")
+      append("Tap 'Join Class' to enter session.")
+    }
+
     val notification = NotificationCompat.Builder(context, CHANNEL_CLASS_ALARM_ID)
       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-      .setContentTitle("⏰ LIVE CLASS ALARM: $title")
-      .setContentText("$subject • Faculty: $educator is starting now!")
+      .setContentTitle("⏰ LIVE CLASS: $title")
+      .setContentText("$classTag • $subject • Faculty: $educator")
+      .setSubText(classTag)
       .setStyle(
         NotificationCompat.BigTextStyle()
-          .bigText("⏰ Your scheduled class '$title' is starting right now!\nSubject: $subject\nFaculty: $educator\nTap 'Join Class' to enter meeting.")
+          .bigText(bigDetails)
+          .setSummaryText("$classTag | $subject")
       )
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_ALARM)

@@ -28,7 +28,7 @@ data class Student(
   val id: String,
   val rollNo: String,
   val name: String,
-  val studentClass: String? = "Class 10 (Secondary)",
+  val studentClass: String? = null,
   val mode: String? = "offline",
   val mobile: String,
   val aadhaarNo: String,

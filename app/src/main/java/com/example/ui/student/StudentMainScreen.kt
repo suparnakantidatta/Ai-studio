@@ -46,8 +46,17 @@ fun StudentMainScreen(
   var showLogoutDialog by remember { mutableStateOf(false) }
   val isSyncing by repository.isSyncing.collectAsState()
   val liveClasses by repository.liveClasses.collectAsState()
+  val courses by repository.courses.collectAsState()
+  val batches by repository.batches.collectAsState()
   val isAlarmRinging by ClassAlarmAudioPlayer.isRinging.collectAsState()
   val activeAlarmTitle by ClassAlarmAudioPlayer.activeAlarmSessionTitle.collectAsState()
+
+  val studentCourse = courses.find { it.id == student.courseId }
+  val studentBatch = batches.find { it.id == student.batchId }
+  val displayClass = studentCourse?.academicClass?.takeIf { it.isNotBlank() }
+    ?: student.studentClass?.takeIf { it.isNotBlank() && !it.startsWith("Class 10 (Secondary)") }
+    ?: studentCourse?.title?.takeIf { it.isNotBlank() }
+    ?: "Class 12"
 
   // Permission launcher for Notifications on Android 13+
   val permissionLauncher = rememberLauncherForActivityResult(
@@ -109,7 +118,7 @@ fun StudentMainScreen(
                 color = Color.White
               )
               Text(
-                text = "Roll: ${student.rollNo} • ${student.studentClass ?: "Class 10"}",
+                text = "Roll: ${student.rollNo} • $displayClass",
                 fontSize = 11.sp,
                 color = Color(0xFFA5B4FC)
               )

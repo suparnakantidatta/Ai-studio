@@ -69,6 +69,10 @@ fun StudentDashboardTab(
 
   val studentCourse = courses.find { it.id == student.courseId }
   val studentBatch = batches.find { it.id == student.batchId }
+  val displayClass = studentCourse?.academicClass?.takeIf { it.isNotBlank() }
+    ?: student.studentClass?.takeIf { it.isNotBlank() && !it.startsWith("Class 10 (Secondary)") }
+    ?: studentCourse?.title?.takeIf { it.isNotBlank() }
+    ?: "Class 12"
 
   // Dynamic fee calculation as per batch & course, admission date, and website-adjusted payments
   val feeSummary = remember(student, courses, batches, payments, admissions, discounts) {
@@ -217,14 +221,14 @@ fun StudentDashboardTab(
               Icon(Icons.Default.AlarmOn, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(20.dp))
               Column {
                 Text(
-                  text = "Live Class: ${nextLive.title}",
+                  text = "Live: ${nextLive.title}",
                   fontSize = 12.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFF166534),
                   maxLines = 1
                 )
                 Text(
-                  text = "${nextLive.scheduledDate} • ${nextLive.startTime} • Alarm Set on Time ⏰",
+                  text = "${nextLive.academicClass ?: "Class 12"} • ${nextLive.scheduledDate} at ${nextLive.startTime} • Alarm set on time ⏰",
                   fontSize = 11.sp,
                   color = Color(0xFF15803D)
                 )
@@ -293,7 +297,7 @@ fun StudentDashboardTab(
             Column {
               Text(text = "Class Standard", fontSize = 11.sp, color = SlateTextSecondary)
               Text(
-                text = student.studentClass ?: "Class 10",
+                text = displayClass,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = SlateTextPrimary

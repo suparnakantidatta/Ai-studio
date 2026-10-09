@@ -14,20 +14,49 @@ object ClassAlarmManager {
   private const val KEY_PREFIX_POSTPONED_NOTIFIED = "notified_postponed_"
 
   /**
-   * Robust parser for class date ("2026-10-10", "2026-10-06") and time ("09:00", "09:00 AM", "19:00", "07:00 PM").
+   * Robust parser for class date ("2026-10-10", "10-10-2026", "10/10/2026") and time ("11:00", "09:00 AM", "13:00", "07:00 PM").
    */
   fun parseClassDateTime(dateStr: String, timeStr: String): Calendar? {
     try {
       val cal = Calendar.getInstance()
       val cleanDate = dateStr.trim().replace("\"", "").replace("'", "")
-      val dateParts = cleanDate.split("-", "/", "T")
+      val dateParts = cleanDate.split("-", "/", "T", " ")
       if (dateParts.size >= 3) {
-        val y = dateParts[0].toIntOrNull() ?: return null
-        val m = dateParts[1].toIntOrNull() ?: return null
-        val d = dateParts[2].take(2).toIntOrNull() ?: return null
+        val p0 = dateParts[0].toIntOrNull() ?: return null
+        val p1 = dateParts[1].toIntOrNull() ?: return null
+        val p2 = dateParts[2].take(4).toIntOrNull() ?: return null
+
+        val y: Int
+        val m: Int
+        val d: Int
+        if (p0 >= 2000) {
+          // YYYY-MM-DD
+          y = p0
+          m = p1
+          d = p2
+        } else if (p2 >= 2000) {
+          // DD-MM-YYYY or MM-DD-YYYY
+          y = p2
+          if (p0 > 12) {
+            d = p0
+            m = p1
+          } else if (p1 > 12) {
+            d = p1
+            m = p0
+          } else {
+            // Standard Indian / UK format DD-MM-YYYY
+            d = p0
+            m = p1
+          }
+        } else {
+          y = cal.get(Calendar.YEAR)
+          m = p1
+          d = p0
+        }
+
         cal.set(Calendar.YEAR, y)
-        cal.set(Calendar.MONTH, m - 1)
-        cal.set(Calendar.DAY_OF_MONTH, d)
+        cal.set(Calendar.MONTH, (m - 1).coerceIn(0, 11))
+        cal.set(Calendar.DAY_OF_MONTH, d.coerceIn(1, 31))
       } else {
         return null
       }
@@ -42,8 +71,8 @@ object ClassAlarmManager {
         val minute = if (timeParts.size > 1) timeParts[1].toIntOrNull() ?: 0 else 0
         if (isPm && hour < 12) hour += 12
         if (isAm && hour == 12) hour = 0
-        cal.set(Calendar.HOUR_OF_DAY, hour)
-        cal.set(Calendar.MINUTE, minute)
+        cal.set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
+        cal.set(Calendar.MINUTE, minute.coerceIn(0, 59))
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         return cal
@@ -55,21 +84,34 @@ object ClassAlarmManager {
   }
 
   /**
-   * Sets an exact alarm for the live class session.
+   * Sets an exact alarm for the live class session as scheduled in the database.
    */
   fun setAlarmForClass(context: Context, session: LiveClassSession): Boolean {
     val cal = parseClassDateTime(session.scheduledDate, session.startTime) ?: return false
     val triggerMillis = cal.timeInMillis
     val now = System.currentTimeMillis()
 
+    // If class was scheduled in the past (ended more than 10 mins ago), do NOT trigger alarm
+    if (triggerMillis < now - 10 * 60 * 1000L) {
+      saveAlarmState(context, session.id, false)
+      return false
+    }
+
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
     val intent = Intent(context, ClassAlarmReceiver::class.java).apply {
       action = ClassAlarmReceiver.ACTION_TRIGGER_CLASS_ALARM
       putExtra(ClassAlarmReceiver.EXTRA_SESSION_ID, session.id)
       putExtra(ClassAlarmReceiver.EXTRA_SESSION_TITLE, session.title)
+      putExtra(ClassAlarmReceiver.EXTRA_SESSION_ACADEMIC_CLASS, session.academicClass ?: session.targetClass ?: "Class 12")
       putExtra(ClassAlarmReceiver.EXTRA_SESSION_SUBJECT, session.subject)
       putExtra(ClassAlarmReceiver.EXTRA_EDUCATOR_NAME, session.educatorName)
+      putExtra(ClassAlarmReceiver.EXTRA_SCHEDULED_DATE, session.scheduledDate)
+      putExtra(ClassAlarmReceiver.EXTRA_START_TIME, session.startTime)
+      putExtra(ClassAlarmReceiver.EXTRA_END_TIME, session.endTime)
+      putExtra(ClassAlarmReceiver.EXTRA_PLATFORM, session.platform)
       putExtra(ClassAlarmReceiver.EXTRA_MEETING_URL, session.meetingUrl)
+      putExtra(ClassAlarmReceiver.EXTRA_BATCH_ID, session.batchId)
+      putExtra(ClassAlarmReceiver.EXTRA_COURSE_ID, session.courseId)
     }
 
     val requestCode = (session.id.hashCode() and 0x7FFFFFFF)
@@ -82,13 +124,14 @@ object ClassAlarmManager {
 
     try {
       if (triggerMillis > now) {
+        // Schedule exact alarm for when class starts as per database timetable
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
           alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
         } else {
           alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
         }
       } else {
-        // Class is right now or past today; trigger immediate heads-up alarm
+        // Class is right now (within active 10-minute live window)
         triggerTestAlarm(context, session)
       }
 
@@ -144,9 +187,16 @@ object ClassAlarmManager {
       action = ClassAlarmReceiver.ACTION_TRIGGER_CLASS_ALARM
       putExtra(ClassAlarmReceiver.EXTRA_SESSION_ID, session.id)
       putExtra(ClassAlarmReceiver.EXTRA_SESSION_TITLE, session.title)
+      putExtra(ClassAlarmReceiver.EXTRA_SESSION_ACADEMIC_CLASS, session.academicClass ?: session.targetClass ?: "Class 12")
       putExtra(ClassAlarmReceiver.EXTRA_SESSION_SUBJECT, session.subject)
       putExtra(ClassAlarmReceiver.EXTRA_EDUCATOR_NAME, session.educatorName)
+      putExtra(ClassAlarmReceiver.EXTRA_SCHEDULED_DATE, session.scheduledDate)
+      putExtra(ClassAlarmReceiver.EXTRA_START_TIME, session.startTime)
+      putExtra(ClassAlarmReceiver.EXTRA_END_TIME, session.endTime)
+      putExtra(ClassAlarmReceiver.EXTRA_PLATFORM, session.platform)
       putExtra(ClassAlarmReceiver.EXTRA_MEETING_URL, session.meetingUrl)
+      putExtra(ClassAlarmReceiver.EXTRA_BATCH_ID, session.batchId)
+      putExtra(ClassAlarmReceiver.EXTRA_COURSE_ID, session.courseId)
     }
     context.sendBroadcast(intent)
   }

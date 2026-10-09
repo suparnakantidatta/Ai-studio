@@ -251,21 +251,22 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `admissions application date resolves true admission month when student date was defaulted`() {
-    val studentLateDate = com.example.data.model.Student(
-      id = "stu-test-late",
+  fun `due calculation strictly starts from student admission date and does not bill one month before`() {
+    val studentAdmittedSeptember = com.example.data.model.Student(
+      id = "stu-test-sep",
       rollNo = "PP-2026-593",
-      name = "Test",
+      name = "Test Student",
       mobile = "1234567890",
       aadhaarNo = "123456789012",
       courseId = "course-xi",
       batchId = "batch-morning",
-      admissionDate = "2026-10-28" // Late default
+      admissionDate = "2026-09-01" // Admitted in September
     )
 
+    // Even if an application inquiry occurred in August, fee billing must start strictly at admission date (September)
     val admissionApp = com.example.data.model.AdmissionApplication(
       id = "adm-1788976622086",
-      studentName = "Test",
+      studentName = "Test Student",
       mobile = "1234567890",
       aadhaarNo = "123456789012",
       targetCourseId = "course-xi",
@@ -287,21 +288,35 @@ class ExampleRobolectricTest {
     )
 
     val summary = com.example.util.FeeCalculator.calculateStudentFeeSummary(
-      student = studentLateDate,
+      student = studentAdmittedSeptember,
       courses = listOf(course),
       batches = listOf(batch),
       allPayments = emptyList(),
       admissions = listOf(admissionApp)
     )
 
-    // Should resolve to August 2026, giving 3 months instead of 1
-    assertEquals("August 2026", summary.admissionMonth)
-    assertTrue("Should bill 3 months since August application", summary.monthsElapsed.size >= 3)
-    // Application had status="approved" and default initialPaymentStatus="paid_advance", so synthesized payment covers admission month
-    assertEquals(400.0, summary.totalPaid, 0.01)
-    val expectedGross = summary.monthsElapsed.size * 400.0
-    assertEquals(expectedGross, summary.payableFromAdmissionMonth, 0.01)
-    assertEquals(expectedGross - 400.0, summary.dueAmount, 0.01)
+    // Must resolve to September 2026 (admission date), NOT August (one month before admission)
+    assertEquals("September 2026", summary.admissionMonth)
+    // First billed month must be September, never August
+    assertEquals("September 2026", summary.monthsElapsed.first().monthLabel)
+    assertEquals("2026-09", summary.monthsElapsed.first().monthKey)
+  }
+
+  @Test
+  fun `class alarm date parser correctly handles ISO and Indian date formats for future live classes`() {
+    val calIso = com.example.alarm.ClassAlarmManager.parseClassDateTime("2026-10-10", "11:00")
+    assertNotNull(calIso)
+    assertEquals(2026, calIso!!.get(java.util.Calendar.YEAR))
+    assertEquals(9, calIso.get(java.util.Calendar.MONTH)) // October is 9 in Calendar
+    assertEquals(10, calIso.get(java.util.Calendar.DAY_OF_MONTH))
+    assertEquals(11, calIso.get(java.util.Calendar.HOUR_OF_DAY))
+
+    val calIndian = com.example.alarm.ClassAlarmManager.parseClassDateTime("10-10-2026", "09:00 AM")
+    assertNotNull(calIndian)
+    assertEquals(2026, calIndian!!.get(java.util.Calendar.YEAR))
+    assertEquals(9, calIndian.get(java.util.Calendar.MONTH))
+    assertEquals(10, calIndian.get(java.util.Calendar.DAY_OF_MONTH))
+    assertEquals(9, calIndian.get(java.util.Calendar.HOUR_OF_DAY))
   }
 
   @Test

@@ -216,7 +216,10 @@ object FeeCalculator {
    * e.g. "2026-10-27T18:30:00.000Z", "2026-08-16", "2026-08", "August 2026", "28/10/2026"
    */
   fun parseAdmissionYearMonth(dateStr: String?): Pair<Int, Int> {
-    if (dateStr.isNullOrBlank()) return Pair(2026, 8)
+    if (dateStr.isNullOrBlank()) {
+      val now = Calendar.getInstance()
+      return Pair(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1)
+    }
     val clean = dateStr.trim().replace("\"", "").replace("'", "")
 
     // Check for named month strings like "August 2026" or "October 2026"
@@ -231,21 +234,24 @@ object FeeCalculator {
 
     // Check ISO or yyyy-MM-dd / yyyy-MM format (e.g. 2026-10-27T18:30:00.000Z or 2026-08-16)
     if (clean.matches(Regex("""^\d{4}[-/]\d{1,2}.*"""))) {
-      val parts = clean.split("-", "/", "T")
+      val parts = clean.split("-", "/", "T", " ")
       val y = parts[0].toIntOrNull() ?: 2026
-      val m = parts[1].toIntOrNull() ?: 8
+      val m = parts[1].toIntOrNull() ?: (Calendar.getInstance().get(Calendar.MONTH) + 1)
       return Pair(y, m.coerceIn(1, 12))
     }
 
-    // Check dd-MM-yyyy or dd/MM/yyyy format (e.g. 16-08-2026)
+    // Check dd-MM-yyyy or dd/MM/yyyy format (e.g. 16-08-2026 or 01/03/2026)
     if (clean.matches(Regex("""^\d{1,2}[-/]\d{1,2}[-/]\d{4}.*"""))) {
-      val parts = clean.split("-", "/")
-      val m = parts[1].toIntOrNull() ?: 8
+      val parts = clean.split("-", "/", " ")
+      val p0 = parts[0].toIntOrNull() ?: 1
+      val p1 = parts[1].toIntOrNull() ?: 1
       val y = parts[2].substring(0, 4).toIntOrNull() ?: 2026
+      val m = if (p0 > 12) p1 else if (p1 > 12) p0 else p1 // standard dd-MM-yyyy
       return Pair(y, m.coerceIn(1, 12))
     }
 
-    return Pair(2026, 8)
+    val now = Calendar.getInstance()
+    return Pair(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1)
   }
 
   /**
@@ -308,29 +314,16 @@ object FeeCalculator {
     val monthlyDiscount = defaultDiscountRes.amount
     val effectiveMonthlyFee = maxOf(0.0, standardMonthlyFee - monthlyDiscount)
 
-    // Check if admissions table has an earlier applied date for this student
+    // Check if admissions table has matching application for this student
     val matchingApp = admissions.find { app ->
       (app.studentName.isNotBlank() && app.studentName.equals(student.name, ignoreCase = true)) ||
       (app.mobile.isNotBlank() && app.mobile == student.mobile) ||
       (app.aadhaarNo.isNotBlank() && app.aadhaarNo == student.aadhaarNo)
     }
-    val appDate = matchingApp?.appliedDate?.takeIf { it.isNotBlank() }
-    val studentDate = student.admissionDate.ifBlank { student.admissionMonth.ifBlank { "" } }
 
-    val effectiveAdmissionStr = when {
-      appDate != null && studentDate.isNotBlank() -> {
-        val (appY, appM) = parseAdmissionYearMonth(appDate)
-        val (stuY, stuM) = parseAdmissionYearMonth(studentDate)
-        if (appY < stuY || (appY == stuY && appM < stuM)) {
-          if (appDate.contains("T")) appDate.substringBefore("T") else appDate.take(10)
-        } else {
-          studentDate
-        }
-      }
-      studentDate.isNotBlank() -> studentDate
-      appDate != null -> if (appDate.contains("T")) appDate.substringBefore("T") else appDate.take(10)
-      else -> "2026-08-01"
-    }
+    // Strictly calculate pending amount depending on student's actual admission date in the database
+    val studentDate = student.admissionDate.ifBlank { student.admissionMonth.ifBlank { "" } }
+    val effectiveAdmissionStr = studentDate.ifBlank { matchingApp?.appliedDate ?: "2026-08-01" }
 
     val (admYear, admMonth) = parseAdmissionYearMonth(effectiveAdmissionStr)
     val admissionMonthLabel = "${MONTH_NAMES[admMonth]} $admYear"

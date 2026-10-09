@@ -267,7 +267,15 @@ class PathsalaRepository(private val context: Context) {
     try {
       val res = ApiClient.getApi().loginStudent(StudentLoginRequest(cleanMobile, aadhaarOrRoll))
       if (res.isSuccessful && res.body()?.success == true && res.body()?.student != null) {
-        val student = res.body()!!.student!!
+        val rawStudent = res.body()!!.student!!
+        val matchingCourse = _courses.value.find { it.id == rawStudent.courseId }
+        val classFromCourse = matchingCourse?.academicClass?.ifBlank { null } ?: matchingCourse?.title?.ifBlank { null }
+        val student = if (!classFromCourse.isNullOrBlank() && (rawStudent.studentClass == null || rawStudent.studentClass.startsWith("Class 10 (Secondary)"))) {
+          rawStudent.copy(studentClass = classFromCourse)
+        } else {
+          rawStudent
+        }
+
         ApiClient.authToken = res.body()?.token
         _currentStudent.value = student
         localStore.saveLoggedInStudent(student)
@@ -313,9 +321,16 @@ class PathsalaRepository(private val context: Context) {
     }
 
     return if (student != null) {
-      _currentStudent.value = student
-      localStore.saveLoggedInStudent(student)
-      Result.success(student)
+      val matchingCourse = _courses.value.find { it.id == student.courseId }
+      val classFromCourse = matchingCourse?.academicClass?.ifBlank { null } ?: matchingCourse?.title?.ifBlank { null }
+      val finalStudent = if (!classFromCourse.isNullOrBlank() && (student.studentClass == null || student.studentClass.startsWith("Class 10 (Secondary)"))) {
+        student.copy(studentClass = classFromCourse)
+      } else {
+        student
+      }
+      _currentStudent.value = finalStudent
+      localStore.saveLoggedInStudent(finalStudent)
+      Result.success(finalStudent)
     } else {
       Result.failure(IllegalArgumentException("No student found with this Mobile and Aadhaar/Roll No. Please check credentials."))
     }

@@ -87,8 +87,8 @@ object GoogleSheetSyncService {
 
   private fun parseWebhookData(dataObj: JSONObject): DatabaseDataDto {
     val admissions = parseAdmissionsTable(dataObj.optJSONArray("Admissions"))
-    val students = parseStudentsTable(dataObj.optJSONArray("Students"), admissions)
     val (courses, batches) = parseCoursesBatchesTable(dataObj.optJSONArray("Courses_Batches"))
+    val students = parseStudentsTable(dataObj.optJSONArray("Students"), admissions, courses)
     val payments = parsePaymentsTable(dataObj.optJSONArray("Fee_Transactions"))
     val discounts = parseDiscountsTable(dataObj.optJSONArray("Discounts"))
     val educators = parseEducatorsTable(dataObj.optJSONArray("Educators"))
@@ -122,7 +122,8 @@ object GoogleSheetSyncService {
 
   private fun parseStudentsTable(
     array: JSONArray?,
-    admissionsList: List<AdmissionApplication>? = null
+    admissionsList: List<AdmissionApplication>? = null,
+    coursesList: List<Course>? = null
   ): List<Student> {
     val list = mutableListOf<Student>()
     if (array == null || array.length() <= 1) return list
@@ -134,6 +135,7 @@ object GoogleSheetSyncService {
     var admDateCol = 11
     var baseFeeCol = 14
     var totalPaidCol = 15
+    var classCol = -1
 
     if (headerRow != null) {
       for (c in 0 until headerRow.length()) {
@@ -143,6 +145,7 @@ object GoogleSheetSyncService {
         if (h.contains("admission") || h.contains("joining")) admDateCol = c
         if (h.contains("base fee") || h.contains("monthly base")) baseFeeCol = c
         if (h.contains("total paid") || h.contains("amount paid")) totalPaidCol = c
+        if (h.contains("class") || h.contains("standard") || h.contains("grade")) classCol = c
       }
     }
 
@@ -160,23 +163,14 @@ object GoogleSheetSyncService {
       val courseId = optCell(row, 9)
       val batchId = optCell(row, 10)
       val rawDate = optCell(row, admDateCol)
-      var admissionDate = if (rawDate.contains("T")) rawDate.substringBefore("T") else rawDate.take(10).ifBlank { "2026-08-01" }
+      val admissionDate = if (rawDate.contains("T")) rawDate.substringBefore("T") else rawDate.take(10).ifBlank { "2026-08-01" }
 
-      // Check if admissions table has an earlier applied date for this student
-      if (admissionsList != null) {
-        val matchingApp = admissionsList.find { app ->
-          (app.studentName.isNotBlank() && app.studentName.equals(name, ignoreCase = true)) ||
-          (app.mobile.isNotBlank() && app.mobile == mobile) ||
-          (app.aadhaarNo.isNotBlank() && app.aadhaarNo == aadhaar)
-        }
-        if (matchingApp != null && matchingApp.appliedDate.isNotBlank()) {
-          val appDate = if (matchingApp.appliedDate.contains("T")) matchingApp.appliedDate.substringBefore("T") else matchingApp.appliedDate.take(10)
-          // If student date is late October or blank or after applied date, prefer applied date
-          if (admissionDate.startsWith("2026-10") && appDate.startsWith("2026-08")) {
-            admissionDate = appDate
-          }
-        }
-      }
+      val matchingCourse = coursesList?.find { it.id == courseId }
+      val explicitClass = if (classCol != -1) optCell(row, classCol).ifBlank { null } else null
+      val resolvedClass = explicitClass
+        ?: matchingCourse?.academicClass?.ifBlank { null }
+        ?: matchingCourse?.title?.ifBlank { null }
+        ?: "Class 12"
 
       val admissionMonth = admissionDate.take(7).ifBlank { "2026-08" }
       val status = optCell(row, 12).ifBlank { "active" }
@@ -199,6 +193,7 @@ object GoogleSheetSyncService {
           id = id,
           rollNo = rollNo,
           name = name,
+          studentClass = resolvedClass,
           mobile = mobile,
           aadhaarNo = aadhaar,
           email = email,
@@ -541,17 +536,17 @@ object GoogleSheetSyncService {
       parseAdmissionsTable(arr)
     } ?: emptyList()
 
-    val students = fetchCsvRows("Students", GIDS["Students"] ?: "1572610885")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseStudentsTable(arr, admissions)
-    } ?: emptyList()
-
     val (courses, batches) = fetchCsvRows("Courses_Batches", GIDS["Courses_Batches"] ?: "563739523")?.let { rows ->
       val arr = JSONArray()
       rows.forEach { r -> arr.put(JSONArray(r)) }
       parseCoursesBatchesTable(arr)
     } ?: Pair(emptyList(), emptyList())
+
+    val students = fetchCsvRows("Students", GIDS["Students"] ?: "1572610885")?.let { rows ->
+      val arr = JSONArray()
+      rows.forEach { r -> arr.put(JSONArray(r)) }
+      parseStudentsTable(arr, admissions, courses)
+    } ?: emptyList()
 
     val payments = fetchCsvRows("Fee_Transactions", GIDS["Fee_Transactions"] ?: "154871224")?.let { rows ->
       val arr = JSONArray()
