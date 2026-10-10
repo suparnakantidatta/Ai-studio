@@ -78,6 +78,7 @@ fun LoginScreen(
     Column(
       modifier = Modifier
         .fillMaxSize()
+        .imePadding()
         .verticalScroll(scrollState)
         .padding(horizontal = 24.dp, vertical = 24.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
@@ -228,6 +229,8 @@ fun LoginScreen(
               }
             }
 
+            val isStudentFormValid = studentMobile.length == 10 && studentAadhaar.trim().isNotBlank()
+
             OutlinedTextField(
               value = studentMobile,
               onValueChange = { if (it.length <= 10) studentMobile = it.filter { char -> char.isDigit() } },
@@ -243,30 +246,45 @@ fun LoginScreen(
             OutlinedTextField(
               value = studentAadhaar,
               onValueChange = { studentAadhaar = it },
-              label = { Text("Aadhaar (12 digits / last 4) or Roll No") },
-              placeholder = { Text("Enter Aadhaar No or Roll No") },
+              label = { Text("Aadhaar (12 digits / last 4) or Roll No *") },
+              placeholder = { Text("Enter registered Aadhaar or Roll No") },
               leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = IndigoPrimary) },
               singleLine = true,
               shape = RoundedCornerShape(14.dp),
-              modifier = Modifier.fillMaxWidth()
+              modifier = Modifier.fillMaxWidth(),
+              supportingText = {
+                Text(
+                  text = "Aadhaar number or Roll number is required to verify student identity.",
+                  fontSize = 11.sp,
+                  color = if (studentAadhaar.isBlank() && studentMobile.length == 10) Color(0xFFDC2626) else SlateTextSecondary
+                )
+              }
             )
 
             Button(
               onClick = {
+                if (studentMobile.length < 10) {
+                  studentError = "Please enter a valid 10-digit registered mobile number."
+                  return@Button
+                }
+                if (studentAadhaar.trim().isBlank()) {
+                  studentError = "Please enter your registered Aadhaar number or Roll number."
+                  return@Button
+                }
                 studentError = null
                 studentLoading = true
                 coroutineScope.launch {
-                  val result = repository.loginStudent(studentMobile, studentAadhaar)
+                  val result = repository.loginStudent(studentMobile, studentAadhaar.trim())
                   studentLoading = false
                   result.onSuccess {
                     Toast.makeText(context, "Welcome back, ${it.name}!", Toast.LENGTH_SHORT).show()
                     onStudentLoginSuccess()
                   }.onFailure {
-                    studentError = it.message ?: "Authentication failed"
+                    studentError = it.message ?: "Authentication failed. Please verify credentials."
                   }
                 }
               },
-              enabled = !studentLoading && studentMobile.length >= 10,
+              enabled = !studentLoading && isStudentFormValid,
               shape = RoundedCornerShape(14.dp),
               colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
               modifier = Modifier

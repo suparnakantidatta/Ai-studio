@@ -435,7 +435,7 @@ fun StudentDashboardTab(
                 color = Color(0xFF991B1B)
               )
               Text(
-                text = "₹${totalDue.toInt()} due since admission (${feeSummary.admissionDate}): ${unpaidMonths.joinToString { it.monthLabel.split(" ")[0] }}",
+                text = "₹${totalDue.toInt()} due since admission (${com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(feeSummary.admissionDate)}): ${unpaidMonths.joinToString { it.monthLabel.split(" ")[0] }}",
                 fontSize = 12.sp,
                 color = Color(0xFFB91C1C),
                 modifier = Modifier.padding(top = 2.dp)
@@ -459,7 +459,7 @@ fun StudentDashboardTab(
     item {
       SectionHeader(
         title = "Monthly Fee Schedule",
-        subtitle = "From admission date (${feeSummary.admissionDate}) with payment adjustments"
+        subtitle = "From admission date (${com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(feeSummary.admissionDate)}) with payment adjustments"
       )
     }
 

@@ -232,9 +232,13 @@ object FeeCalculator {
       }
     }
 
-    // Check ISO or yyyy-MM-dd / yyyy-MM format (e.g. 2026-10-27T18:30:00.000Z or 2026-08-16)
-    if (clean.matches(Regex("""^\d{4}[-/]\d{1,2}.*"""))) {
-      val parts = clean.split("-", "/", "T", " ")
+    // Normalize ISO UTC timestamps to IST date first to prevent 1-day/1-month back shifts
+    val normalizedIso = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(clean)
+    val toParse = if (normalizedIso.isNotBlank()) normalizedIso else clean
+
+    // Check ISO or yyyy-MM-dd / yyyy-MM format (e.g. 2026-10-10 or 2026-08-16)
+    if (toParse.matches(Regex("""^\d{4}[-/]\d{1,2}.*"""))) {
+      val parts = toParse.split("-", "/", "T", " ")
       val y = parts[0].toIntOrNull() ?: 2026
       val m = parts[1].toIntOrNull() ?: (Calendar.getInstance().get(Calendar.MONTH) + 1)
       return Pair(y, m.coerceIn(1, 12))
@@ -322,8 +326,10 @@ object FeeCalculator {
     }
 
     // Strictly calculate pending amount depending on student's actual admission date in the database
-    val studentDate = student.admissionDate.ifBlank { student.admissionMonth.ifBlank { "" } }
-    val effectiveAdmissionStr = studentDate.ifBlank { matchingApp?.appliedDate ?: "2026-08-01" }
+    val rawStudentDate = student.admissionDate.ifBlank { student.admissionMonth.ifBlank { "" } }
+    val studentDate = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(rawStudentDate)
+    val appDate = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(matchingApp?.appliedDate)
+    val effectiveAdmissionStr = studentDate.ifBlank { appDate.ifBlank { "2026-08-01" } }
 
     val (admYear, admMonth) = parseAdmissionYearMonth(effectiveAdmissionStr)
     val admissionMonthLabel = "${MONTH_NAMES[admMonth]} $admYear"

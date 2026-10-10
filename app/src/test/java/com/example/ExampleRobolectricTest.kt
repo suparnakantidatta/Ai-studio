@@ -30,11 +30,62 @@ class ExampleRobolectricTest {
 
     // Using seed student: Rohan Sharma (mobile: 9876543210, aadhaar: 453289012345)
     val result = repository.loginStudent("9876543210", "453289012345")
-    assertTrue("Student login should succeed", result.isSuccess)
+    assertTrue("Student login should succeed with full 12-digit Aadhaar", result.isSuccess)
     val student = result.getOrNull()
     assertNotNull(student)
     assertEquals("Rohan Sharma", student?.name)
     assertEquals("PP-2026-001", student?.rollNo)
+  }
+
+  @Test
+  fun `student login with phone number only fails when aadhaar is blank`() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repository = PathsalaRepository(context)
+
+    // Must strictly fail when Aadhaar is not provided
+    val blankAadhaarResult = repository.loginStudent("9876543210", "")
+    assertTrue("Student login with phone only must fail", blankAadhaarResult.isFailure)
+
+    val spacesAadhaarResult = repository.loginStudent("9876543210", "   ")
+    assertTrue("Student login with blank spaces Aadhaar must fail", spacesAadhaarResult.isFailure)
+  }
+
+  @Test
+  fun `student login with wrong aadhaar number fails`() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repository = PathsalaRepository(context)
+
+    // Using incorrect Aadhaar
+    val result = repository.loginStudent("9876543210", "999999999999")
+    assertTrue("Student login with wrong Aadhaar must fail", result.isFailure)
+  }
+
+  @Test
+  fun `student login with last 4 digits of aadhaar succeeds`() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repository = PathsalaRepository(context)
+
+    // Rohan Sharma has Aadhaar 453289012345 -> last 4 digits are 2345
+    val result = repository.loginStudent("9876543210", "2345")
+    assertTrue("Student login with last 4 digits of Aadhaar should succeed", result.isSuccess)
+    assertEquals("Rohan Sharma", result.getOrNull()?.name)
+  }
+
+  @Test
+  fun `parseIsoDateToLocalDate converts UTC timestamp to exact IST database date`() {
+    val syncService = com.example.data.sheet.GoogleSheetSyncService
+
+    // In Google Sheets: 2026-10-10 IST, Google Apps Script serializes to 2026-10-09T18:30:00.000Z
+    val oct10Date = syncService.parseIsoDateToLocalDate("2026-10-09T18:30:00.000Z")
+    assertEquals("2026-10-10", oct10Date)
+
+    // In Google Sheets: 2026-03-01 IST, Google Apps Script serializes to 2026-02-28T18:30:00.000Z
+    val mar01Date = syncService.parseIsoDateToLocalDate("2026-02-28T18:30:00.000Z")
+    assertEquals("2026-03-01", mar01Date)
+
+    // Plain date string should remain unchanged
+    val plainDate = syncService.parseIsoDateToLocalDate("2026-10-10")
+    assertEquals("2026-10-10", plainDate)
   }
 
   @Test

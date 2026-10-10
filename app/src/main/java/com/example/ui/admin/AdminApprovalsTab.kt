@@ -354,8 +354,10 @@ fun AdminApprovalsTab(
                     assignedRollNo = "PP-2026-${(100..999).random()}"
                     assignedBatchId = app.preferredBatchId ?: (batches.firstOrNull()?.id ?: "batch-1")
                     enrollAdmissionDate = if (app.appliedDate.isNotBlank()) {
-                      if (app.appliedDate.contains("T")) app.appliedDate.substringBefore("T") else app.appliedDate.take(10)
-                    } else "2026-08-15"
+                      com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(app.appliedDate).ifBlank {
+                        com.example.data.sheet.GoogleSheetSyncService.getCurrentIstDate()
+                      }
+                    } else com.example.data.sheet.GoogleSheetSyncService.getCurrentIstDate()
                     enrollMonthlyDiscount = ""
                     enrollDiscountReason = "Merit Concession"
                     val stdFee = targetCourse?.monthlyFee?.toInt() ?: 400

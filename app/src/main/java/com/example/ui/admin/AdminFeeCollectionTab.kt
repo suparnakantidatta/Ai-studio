@@ -628,7 +628,7 @@ fun AdminFeeCollectionTab(
                   color = Color(0xFF0F172A)
                 )
                 Text(
-                  text = "Batch: ${selectedSummary.batch?.name ?: "All Batches"} • Admitted: ${selectedSummary.admissionDate}",
+                  text = "Batch: ${selectedSummary.batch?.name ?: "All Batches"} • Admitted: ${com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(selectedSummary.admissionDate)}",
                   fontSize = 11.sp,
                   color = SlateTextSecondary
                 )
@@ -781,7 +781,7 @@ fun AdminFeeCollectionTab(
 
   // Edit Admission Date & Discount Dialog
   studentToEditFee?.let { summ ->
-    var editAdmDate by remember(summ) { mutableStateOf(summ.student.admissionDate.ifBlank { "2026-08-15" }) }
+    var editAdmDate by remember(summ) { mutableStateOf(com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(summ.student.admissionDate).ifBlank { "2026-10-10" }) }
     var editDiscountText by remember(summ) { mutableStateOf(summ.student.monthlyDiscount?.toInt()?.toString() ?: if (summ.monthlyDiscount > 0) summ.monthlyDiscount.toInt().toString() else "") }
     var editDiscountReason by remember(summ) { mutableStateOf(summ.student.discountReason ?: "Merit Scholarship") }
     var editOverrideText by remember(summ) { mutableStateOf(summ.student.customMonthlyFeeOverride?.toInt()?.toString() ?: "") }

@@ -257,24 +257,31 @@ class PathsalaRepository(private val context: Context) {
 
   suspend fun loginStudent(mobile: String, aadhaarOrRoll: String): Result<Student> {
     val cleanMobile = mobile.replace(Regex("[^0-9]"), "").takeLast(10)
-    val cleanAadhaar = aadhaarOrRoll.replace(Regex("[^0-9]"), "")
+    val trimmedAadhaarOrRoll = aadhaarOrRoll.trim()
+    val cleanAadhaar = trimmedAadhaarOrRoll.replace(Regex("[^0-9]"), "")
+    val queryRoll = trimmedAadhaarOrRoll.lowercase(Locale.ROOT)
 
     if (cleanMobile.length < 10) {
-      return Result.failure(IllegalArgumentException("Please enter a valid 10-digit mobile number"))
+      return Result.failure(IllegalArgumentException("Please enter a valid 10-digit registered mobile number."))
+    }
+    if (trimmedAadhaarOrRoll.isBlank()) {
+      return Result.failure(IllegalArgumentException("Please enter your registered Aadhaar number or Roll number."))
     }
 
     // First attempt remote backend API login
     try {
-      val res = ApiClient.getApi().loginStudent(StudentLoginRequest(cleanMobile, aadhaarOrRoll))
+      val res = ApiClient.getApi().loginStudent(StudentLoginRequest(cleanMobile, trimmedAadhaarOrRoll))
       if (res.isSuccessful && res.body()?.success == true && res.body()?.student != null) {
         val rawStudent = res.body()!!.student!!
         val matchingCourse = _courses.value.find { it.id == rawStudent.courseId }
         val classFromCourse = matchingCourse?.academicClass?.ifBlank { null } ?: matchingCourse?.title?.ifBlank { null }
-        val student = if (!classFromCourse.isNullOrBlank() && (rawStudent.studentClass == null || rawStudent.studentClass.startsWith("Class 10 (Secondary)"))) {
+        val student = (if (!classFromCourse.isNullOrBlank() && (rawStudent.studentClass == null || rawStudent.studentClass.startsWith("Class 10 (Secondary)"))) {
           rawStudent.copy(studentClass = classFromCourse)
         } else {
           rawStudent
-        }
+        }).copy(
+          admissionDate = GoogleSheetSyncService.parseIsoDateToLocalDate(rawStudent.admissionDate)
+        )
 
         ApiClient.authToken = res.body()?.token
         _currentStudent.value = student
@@ -306,28 +313,44 @@ class PathsalaRepository(private val context: Context) {
       val sMobile = s.mobile.replace(Regex("[^0-9]"), "").takeLast(10)
       val sAadhaar = s.aadhaarNo.replace(Regex("[^0-9]"), "")
       val sRoll = s.rollNo.trim().lowercase(Locale.ROOT)
-      val queryRoll = aadhaarOrRoll.trim().lowercase(Locale.ROOT)
 
       val mobileMatches = sMobile == cleanMobile
-      val idMatches = if (cleanAadhaar.length == 12) {
-        sAadhaar == cleanAadhaar
-      } else if (cleanAadhaar.length == 4) {
-        sAadhaar.endsWith(cleanAadhaar)
-      } else {
-        sRoll.contains(queryRoll) || queryRoll.contains(sRoll)
+
+      val idMatches = when {
+        // Full 12-digit Aadhaar match
+        cleanAadhaar.length == 12 && sAadhaar.isNotBlank() -> {
+          sAadhaar == cleanAadhaar
+        }
+        // Partial or last 4 digits of Aadhaar (or 4-11 digits)
+        cleanAadhaar.length in 4..11 && sAadhaar.isNotBlank() -> {
+          sAadhaar == cleanAadhaar || sAadhaar.endsWith(cleanAadhaar)
+        }
+        // Roll number match
+        queryRoll.isNotBlank() && sRoll.isNotBlank() -> {
+          sRoll.equals(queryRoll, ignoreCase = true) ||
+          (queryRoll.length >= 3 && sRoll.contains(queryRoll, ignoreCase = true)) ||
+          queryRoll.contains(sRoll, ignoreCase = true)
+        }
+        // If student record in DB has no Aadhaar & no Roll yet, allow registration phone match
+        sAadhaar.isBlank() && sRoll.isBlank() -> {
+          cleanAadhaar == cleanMobile || cleanAadhaar.endsWith(cleanMobile.takeLast(4))
+        }
+        else -> false
       }
 
-      mobileMatches && (idMatches || aadhaarOrRoll.isBlank())
+      mobileMatches && idMatches
     }
 
     return if (student != null) {
       val matchingCourse = _courses.value.find { it.id == student.courseId }
       val classFromCourse = matchingCourse?.academicClass?.ifBlank { null } ?: matchingCourse?.title?.ifBlank { null }
-      val finalStudent = if (!classFromCourse.isNullOrBlank() && (student.studentClass == null || student.studentClass.startsWith("Class 10 (Secondary)"))) {
+      val finalStudent = (if (!classFromCourse.isNullOrBlank() && (student.studentClass == null || student.studentClass.startsWith("Class 10 (Secondary)"))) {
         student.copy(studentClass = classFromCourse)
       } else {
         student
-      }
+      }).copy(
+        admissionDate = GoogleSheetSyncService.parseIsoDateToLocalDate(student.admissionDate)
+      )
       _currentStudent.value = finalStudent
       localStore.saveLoggedInStudent(finalStudent)
       Result.success(finalStudent)
@@ -540,9 +563,11 @@ class PathsalaRepository(private val context: Context) {
     val course = _courses.value.find { it.id == app.targetCourseId }
     val batch = _batches.value.find { it.id == assignedBatchId }
 
-    val appDate = app.appliedDate.ifBlank { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
-    val admDate = if (appDate.contains("T")) appDate.substringBefore("T") else appDate.take(10)
-    val cleanAdmDate = customAdmissionDate?.takeIf { it.isNotBlank() } ?: admDate
+    val appDate = GoogleSheetSyncService.parseIsoDateToLocalDate(app.appliedDate).ifBlank {
+      GoogleSheetSyncService.getCurrentIstDate()
+    }
+    val cleanAdmDate = customAdmissionDate?.takeIf { it.isNotBlank() }
+      ?.let { GoogleSheetSyncService.parseIsoDateToLocalDate(it) } ?: appDate
     val cleanAdmMonth = cleanAdmDate.take(7)
 
     val newStudent = Student(
@@ -649,7 +674,8 @@ class PathsalaRepository(private val context: Context) {
     val batch = _batches.value.find { it.id == batchId }
 
     val admDate = customAdmissionDate?.trim()?.ifBlank { null }
-      ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+      ?.let { GoogleSheetSyncService.parseIsoDateToLocalDate(it) }
+      ?: GoogleSheetSyncService.getCurrentIstDate()
     val admMonth = admDate.take(7)
 
     val newStudent = Student(
@@ -761,7 +787,7 @@ class PathsalaRepository(private val context: Context) {
     newCustomFeeOverride: Double?,
     newDiscountReason: String? = null
   ) {
-    val cleanDate = newAdmissionDate.trim()
+    val cleanDate = GoogleSheetSyncService.parseIsoDateToLocalDate(newAdmissionDate.trim()).ifBlank { newAdmissionDate.trim() }
     val cleanMonth = cleanDate.take(7)
     val updated = _students.value.map { s ->
       if (s.id == studentId) {

@@ -60,7 +60,7 @@ fun AdminStudentsTab(
   var newCourseId by remember { mutableStateOf(courses.firstOrNull()?.id ?: "course-1788019409876") }
   var newBatchId by remember { mutableStateOf(batches.firstOrNull()?.id ?: "batch-1788019693229") }
   var newDeliveryMode by remember { mutableStateOf("offline") }
-  var newAdmissionDate by remember { mutableStateOf(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())) }
+  var newAdmissionDate by remember { mutableStateOf(com.example.data.sheet.GoogleSheetSyncService.getCurrentIstDate()) }
   var newMonthlyDiscount by remember { mutableStateOf("") }
   var newDiscountReason by remember { mutableStateOf("") }
   var recordFeeAtAdmission by remember { mutableStateOf(true) }
@@ -243,7 +243,7 @@ fun AdminStudentsTab(
             Column(horizontalAlignment = Alignment.End) {
               Text(text = "Admitted / Mobile", fontSize = 10.sp, color = SlateTextSecondary)
               Text(text = student.mobile, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-              Text(text = "Adm: ${student.admissionDate}", fontSize = 10.sp, color = SlateTextSecondary)
+              Text(text = "Adm: ${com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(student.admissionDate)}", fontSize = 10.sp, color = SlateTextSecondary)
             }
           }
 
@@ -766,7 +766,7 @@ fun AdminStudentsTab(
   // Edit Admission Date & Discount Dialog for existing student
   editingStudent?.let { st ->
     val course = courses.find { it.id == st.courseId }
-    var editAdmDate by remember(st) { mutableStateOf(st.admissionDate.ifBlank { "2026-08-15" }) }
+    var editAdmDate by remember(st) { mutableStateOf(com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(st.admissionDate).ifBlank { "2026-10-10" }) }
     var editDiscountText by remember(st) { mutableStateOf(st.monthlyDiscount?.toInt()?.toString() ?: "") }
     var editDiscountReason by remember(st) { mutableStateOf(st.discountReason ?: "Merit Scholarship") }
     var editOverrideText by remember(st) { mutableStateOf(st.customMonthlyFeeOverride?.toInt()?.toString() ?: "") }

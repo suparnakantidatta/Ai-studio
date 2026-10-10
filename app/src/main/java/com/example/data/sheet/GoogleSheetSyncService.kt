@@ -46,6 +46,82 @@ object GoogleSheetSyncService {
     .build()
 
   /**
+   * Converts UTC ISO 8601 timestamps (e.g. "2026-10-09T18:30:00.000Z", "2026-02-28T18:30:00.000Z")
+   * serialized by Google Apps Script back to the correct local Indian Standard Time date ("2026-10-10", "2026-03-01"),
+   * preventing dates from showing one day before the date saved in the database.
+   */
+  fun parseIsoDateToLocalDate(rawDateStr: String?): String {
+    if (rawDateStr.isNullOrBlank()) return ""
+    val clean = rawDateStr.trim().replace("\"", "").replace("'", "")
+    if (clean.contains("T")) {
+      try {
+        val cleanPrefix = clean.substringBefore(".").substringBefore("+").substringBefore("Z")
+        val sdfUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT).apply {
+          timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val date = sdfUtc.parse(cleanPrefix)
+        if (date != null) {
+          val sdfLocal = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+          }
+          return sdfLocal.format(date)
+        }
+      } catch (_: Exception) {}
+      return clean.substringBefore("T")
+    }
+
+    // Handle dd/MM/yyyy or dd-MM-yyyy formats
+    if (clean.matches(Regex("""^\d{1,2}[-/]\d{1,2}[-/]\d{4}$"""))) {
+      val parts = clean.split("-", "/")
+      val d = parts[0].toIntOrNull() ?: 1
+      val m = parts[1].toIntOrNull() ?: 1
+      val y = parts[2].toIntOrNull() ?: 2026
+      return String.format(Locale.ROOT, "%04d-%02d-%02d", y, m, d)
+    }
+
+    return clean.take(10)
+  }
+
+  fun getCurrentIstDate(): String {
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
+      timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+    }
+    return sdf.format(java.util.Date())
+  }
+
+  fun getCurrentIstYearMonth(): String {
+    val sdf = java.text.SimpleDateFormat("yyyy-MM", Locale.ROOT).apply {
+      timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+    }
+    return sdf.format(java.util.Date())
+  }
+
+  /**
+   * Converts UTC ISO time strings from Google Apps Script (e.g. "1899-12-30T05:30:00.000Z")
+   * to local Indian Standard Time formatted string ("11:00 AM").
+   */
+  fun parseIsoTimeToLocalTime(rawTimeStr: String?): String {
+    if (rawTimeStr.isNullOrBlank()) return "10:00 AM"
+    val clean = rawTimeStr.trim().replace("\"", "").replace("'", "")
+    if (clean.contains("T")) {
+      try {
+        val cleanPrefix = if (clean.contains(".")) clean.substringBefore(".") else clean.replace("Z", "")
+        val sdfUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT).apply {
+          timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val date = sdfUtc.parse(cleanPrefix)
+        if (date != null) {
+          val sdfLocal = java.text.SimpleDateFormat("hh:mm a", Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+          }
+          return sdfLocal.format(date)
+        }
+      } catch (_: Exception) {}
+    }
+    return clean
+  }
+
+  /**
    * Fetches full database from Google Sheet (via Webhook or direct CSV fallback)
    */
   fun fetchDatabaseFromSheet(): DatabaseDataDto? {
@@ -163,7 +239,7 @@ object GoogleSheetSyncService {
       val courseId = optCell(row, 9)
       val batchId = optCell(row, 10)
       val rawDate = optCell(row, admDateCol)
-      val admissionDate = if (rawDate.contains("T")) rawDate.substringBefore("T") else rawDate.take(10).ifBlank { "2026-08-01" }
+      val admissionDate = parseIsoDateToLocalDate(rawDate).ifBlank { "2026-08-01" }
 
       val matchingCourse = coursesList?.find { it.id == courseId }
       val explicitClass = if (classCol != -1) optCell(row, classCol).ifBlank { null } else null
@@ -290,7 +366,7 @@ object GoogleSheetSyncService {
       val monthsList = if (monthsRaw.contains(",")) monthsRaw.split(",").map { it.trim() } else listOf(monthsRaw)
       val month = monthsList.firstOrNull() ?: monthsRaw
       val ref = optCell(row, 7)
-      val date = optCell(row, 8).ifBlank { "2026-10-01" }
+      val date = parseIsoDateToLocalDate(optCell(row, 8)).ifBlank { "2026-10-01" }
       val rawStatus = optCell(row, 9).trim().lowercase(Locale.ROOT)
       val status = if (rawStatus.contains("approve")) "approved" else if (rawStatus.contains("reject")) "rejected" else if (rawStatus.contains("pending")) "pending" else "approved"
       val approvedBy = optCell(row, 10).ifBlank { "Admin" }
@@ -336,7 +412,7 @@ object GoogleSheetSyncService {
       val guardianPhone = optCell(row, 6)
       val courseId = optCell(row, 7)
       val status = optCell(row, 8).ifBlank { "pending" }
-      val appliedDate = optCell(row, 9).take(10)
+      val appliedDate = parseIsoDateToLocalDate(optCell(row, 9)).ifBlank { getCurrentIstDate() }
       val initialFeeStatus = optCell(row, 10).ifBlank { "paid_advance" }
       val paymentMode = optCell(row, 11).ifBlank { "UPI" }
       val paymentRef = optCell(row, 12).ifBlank { null }
@@ -647,7 +723,7 @@ object GoogleSheetSyncService {
       val courseId = optCell(row, 4).ifBlank { "all" }
       val batchId = optCell(row, 5).ifBlank { "all" }
       val educator = optCell(row, 6).ifBlank { "Faculty Desk" }
-      val date = optCell(row, 7).ifBlank { "2026-09-29" }
+      val date = parseIsoDateToLocalDate(optCell(row, 7)).ifBlank { getCurrentIstDate() }
       val startTime = optCell(row, 8).ifBlank { "10:00 AM" }
       val endTime = optCell(row, 9).ifBlank { "11:30 AM" }
       val status = optCell(row, 10).ifBlank { "scheduled" }
@@ -789,7 +865,7 @@ object GoogleSheetSyncService {
       val passingPct = optCell(row, 10).toIntOrNull() ?: 40
       val status = optCell(row, 11).ifBlank { "active" }
       val mode = optCell(row, 12).ifBlank { "online" }
-      val scheduledDate = optCell(row, 13).ifBlank { "2026-09-29" }
+      val scheduledDate = parseIsoDateToLocalDate(optCell(row, 13)).ifBlank { getCurrentIstDate() }
       val startTime = optCell(row, 14).ifBlank { "09:00 AM" }
       val endTime = optCell(row, 15).ifBlank { "09:00 PM" }
       val questionIdsStr = optCell(row, 17)
