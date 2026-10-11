@@ -6,9 +6,11 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -59,7 +61,11 @@ fun AdminFeeCollectionTab(
       FeeCalculator.calculateStudentFeeSummary(st, courses, batches, payments, admissions, discounts)
     }
   }
-  val studentDuesList = studentSummaries.filter { it.dueAmount > 0 }
+  val studentDuesList = remember(studentSummaries) { studentSummaries.filter { it.dueAmount > 0 } }
+  var duesFilter by remember { mutableStateOf("dues") } // "dues" or "all"
+  val displayedSummaries = remember(duesFilter, studentSummaries, studentDuesList) {
+    if (duesFilter == "dues") studentDuesList else studentSummaries
+  }
 
   // Fee collection form inputs
   var selectedStudentId by remember { mutableStateOf(students.firstOrNull()?.id ?: "") }
@@ -214,10 +220,35 @@ fun AdminFeeCollectionTab(
               }
             }
           }
+
+          // Filter pills: Dues Only vs All Students
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            FilterChip(
+              selected = duesFilter == "dues",
+              onClick = { duesFilter = "dues" },
+              label = { Text("With Dues (${studentDuesList.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+              colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = Color(0xFFFEE2E2),
+                selectedLabelColor = Color(0xFF991B1B)
+              )
+            )
+            FilterChip(
+              selected = duesFilter == "all",
+              onClick = { duesFilter = "all" },
+              label = { Text("All Admitted Students (${studentSummaries.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+              colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = Color(0xFFE0E7FF),
+                selectedLabelColor = IndigoPrimary
+              )
+            )
+          }
         }
       }
 
-      if (studentDuesList.isEmpty()) {
+      if (displayedSummaries.isEmpty()) {
         item {
           Card(
             shape = RoundedCornerShape(18.dp),
@@ -234,12 +265,12 @@ fun AdminFeeCollectionTab(
             ) {
               Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(36.dp))
               Text("No Outstanding Dues!", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-              Text("All enrolled students have cleared their fees for current session.", fontSize = 12.sp, color = SlateTextSecondary)
+              Text("All enrolled students have cleared their fees for the current session.", fontSize = 12.sp, color = SlateTextSecondary)
             }
           }
         }
       } else {
-        items(studentDuesList) { summary ->
+        items(displayedSummaries) { summary ->
           val student = summary.student
           val dueAmount = summary.dueAmount
 
@@ -353,27 +384,86 @@ fun AdminFeeCollectionTab(
                 }
               }
 
-              // Months status preview
+              // Full Months status breakdown (showing all months from admission to current month)
               if (summary.monthsElapsed.isNotEmpty()) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(4.dp),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  summary.monthsElapsed.forEach { m ->
-                    val isMthPaid = m.isPaid
-                    Box(
-                      modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (isMthPaid) Color(0xFFDCFCE7) else Color(0xFFFEE2E2))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                      Text(
-                        text = "${m.monthLabel.split(" ")[0]}: ${if (isMthPaid) "Paid" else "Due"}",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isMthPaid) Color(0xFF166534) else Color(0xFF991B1B)
-                      )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Text(
+                      text = "Monthly Status (${summary.paidMonthsCount} Paid, ${summary.dueMonthsCount} Due):",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = SlateTextPrimary
+                    )
+                    Text(
+                      text = "Scroll for all months →",
+                      fontSize = 9.sp,
+                      color = SlateTextSecondary
+                    )
+                  }
+
+                  // Scrollable row showing every single month without truncation
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    summary.monthsElapsed.forEach { m ->
+                      val isMthPaid = m.isPaid
+                      val isMthPending = m.isPending
+                      Box(
+                        modifier = Modifier
+                          .clip(RoundedCornerShape(8.dp))
+                          .background(
+                            when {
+                              isMthPaid -> Color(0xFFDCFCE7)
+                              isMthPending -> Color(0xFFFEF3C7)
+                              else -> Color(0xFFFEE2E2)
+                            }
+                          )
+                          .border(
+                            1.dp,
+                            when {
+                              isMthPaid -> Color(0xFF86EFAC)
+                              isMthPending -> Color(0xFFFCD34D)
+                              else -> Color(0xFFFCA5A5)
+                            },
+                            RoundedCornerShape(8.dp)
+                          )
+                          .padding(horizontal = 8.dp, vertical = 4.dp)
+                      ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          Text(
+                            text = m.monthLabel.split(" ")[0],
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = when {
+                              isMthPaid -> Color(0xFF166534)
+                              isMthPending -> Color(0xFF92400E)
+                              else -> Color(0xFF991B1B)
+                            }
+                          )
+                          Text(
+                            text = when {
+                              isMthPaid -> "Paid (₹${m.paidAmount.toInt()})"
+                              isMthPending -> "Pending"
+                              else -> "Due (₹${m.dueAmount.toInt()})"
+                            },
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = when {
+                              isMthPaid -> Color(0xFF15803D)
+                              isMthPending -> Color(0xFFB45309)
+                              else -> Color(0xFFB91C1C)
+                            }
+                          )
+                        }
+                      }
                     }
                   }
                 }

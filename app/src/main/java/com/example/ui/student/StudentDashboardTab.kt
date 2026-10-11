@@ -60,19 +60,20 @@ fun StudentDashboardTab(
   val isAlarmRinging by ClassAlarmAudioPlayer.isRinging.collectAsState()
   val activeRingingTitle by ClassAlarmAudioPlayer.activeAlarmSessionTitle.collectAsState()
 
-  val studentLive = liveClasses.filter {
-    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
-    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  val studentCourse = courses.find { it.id == student.courseId }
+  val studentBatch = batches.find { it.id == student.batchId }
+  val displayClass = FeeCalculator.resolveEffectiveClass(student, courses)
+
+  val studentLive = liveClasses.filter { session ->
+    val classMatches = FeeCalculator.matchesAcademicClass(displayClass, session.academicClass ?: session.targetClass)
+    val courseMatches = session.courseId.isBlank() || session.courseId.equals("all", ignoreCase = true) || session.courseId == student.courseId
+    val batchMatches = session.batchId.isBlank() || session.batchId.equals("all", ignoreCase = true) || session.batchId == student.batchId
+
+    (batchMatches && classMatches) || (courseMatches && classMatches)
   }
   val postponedLive = studentLive.filter { it.status == "postponed" }
   val nextLive = studentLive.firstOrNull { it.status == "scheduled" || it.status == "live" }
 
-  val studentCourse = courses.find { it.id == student.courseId }
-  val studentBatch = batches.find { it.id == student.batchId }
-  val displayClass = studentCourse?.academicClass?.takeIf { it.isNotBlank() }
-    ?: student.studentClass?.takeIf { it.isNotBlank() && !it.startsWith("Class 10 (Secondary)") }
-    ?: studentCourse?.title?.takeIf { it.isNotBlank() }
-    ?: "Class 12"
 
   // Dynamic fee calculation as per batch & course, admission date, and website-adjusted payments
   val feeSummary = remember(student, courses, batches, payments, admissions, discounts) {

@@ -468,4 +468,52 @@ object FeeCalculator {
       appliedDiscountTitle = defaultDiscountRes.title
     )
   }
+
+  /**
+   * Helper to normalize academic class strings (e.g. "Class 12", "Class 12 (Science)", "Class 10 (Secondary)")
+   * and determine whether a target class (from live class, material, exam) matches the student's admitted class.
+   */
+  fun matchesAcademicClass(studentClass: String?, targetClass: String?): Boolean {
+    val target = targetClass?.trim() ?: ""
+    if (target.isBlank() || target.equals("all", ignoreCase = true) ||
+      target.equals("all classes", ignoreCase = true) ||
+      target.equals("general", ignoreCase = true)
+    ) {
+      return true
+    }
+    val student = studentClass?.trim() ?: ""
+    if (student.isBlank()) return true
+
+    fun norm(s: String) = s.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+    val sNorm = norm(student)
+    val tNorm = norm(target)
+
+    if (sNorm == tNorm || sNorm.contains(tNorm) || tNorm.contains(sNorm)) {
+      return true
+    }
+
+    val sDigits = Regex("\\d+").findAll(sNorm).map { it.value }.toList()
+    val tDigits = Regex("\\d+").findAll(tNorm).map { it.value }.toList()
+    if (sDigits.isNotEmpty() && tDigits.isNotEmpty() && sDigits == tDigits) {
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Resolves the student's effective academic class by looking at the student's explicit class,
+   * falling back to their admitted course's academicClass or title.
+   */
+  fun resolveEffectiveClass(student: Student, courses: List<Course>): String {
+    val matchingCourse = courses.find { it.id == student.courseId }
+    val explicit = student.studentClass?.trim()
+    if (!explicit.isNullOrBlank() && !explicit.startsWith("Class 10 (Secondary)")) {
+      return explicit
+    }
+    return matchingCourse?.academicClass?.takeIf { it.isNotBlank() }
+      ?: explicit?.takeIf { it.isNotBlank() }
+      ?: matchingCourse?.title?.takeIf { it.isNotBlank() }
+      ?: "Class 12"
+  }
 }

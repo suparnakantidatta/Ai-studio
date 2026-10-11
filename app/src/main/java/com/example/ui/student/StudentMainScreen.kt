@@ -32,6 +32,7 @@ import com.example.data.model.Student
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.CenterLogo
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,11 +71,14 @@ fun StudentMainScreen(
     ClassNotificationHelper.createNotificationChannels(context)
   }
 
-  // Filter live classes targeted to this student
-  val studentLive = remember(liveClasses, student) {
-    liveClasses.filter {
-      (it.batchId == "all" || it.batchId.isBlank() || it.batchId == student.batchId) &&
-      (it.courseId == "all" || it.courseId.isBlank() || it.courseId == student.courseId)
+  // Filter live classes targeted to this student as per admitted class
+  val studentLive = remember(liveClasses, student, displayClass) {
+    liveClasses.filter { session ->
+      val classMatches = FeeCalculator.matchesAcademicClass(displayClass, session.academicClass ?: session.targetClass)
+      val courseMatches = session.courseId.isBlank() || session.courseId.equals("all", ignoreCase = true) || session.courseId == student.courseId
+      val batchMatches = session.batchId.isBlank() || session.batchId.equals("all", ignoreCase = true) || session.batchId == student.batchId
+
+      (batchMatches && classMatches) || (courseMatches && classMatches)
     }
   }
 
@@ -97,9 +101,7 @@ fun StudentMainScreen(
     }
   }
 
-  val hasActiveLiveClass = liveClasses.any {
-    it.status == "live" && (it.batchId == "all" || it.batchId == student.batchId)
-  }
+  val hasActiveLiveClass = studentLive.any { it.status == "live" }
 
   Scaffold(
     topBar = {

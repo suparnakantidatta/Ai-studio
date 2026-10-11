@@ -31,6 +31,7 @@ import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
 import kotlinx.coroutines.delay
 
 @Composable
@@ -41,12 +42,30 @@ fun StudentExamsTab(
   val exams by repository.exams.collectAsState()
   val questions by repository.questions.collectAsState()
   val submissions by repository.submissions.collectAsState()
+  val courses by repository.courses.collectAsState()
 
   var activeExamToTake by remember { mutableStateOf<OnlineExam?>(null) }
   var selectedSubmissionToReview by remember { mutableStateOf<ExamSubmission?>(null) }
 
-  // Filter exams for student
-  val studentExams = exams.filter { it.isPublished }
+  val admittedClass = FeeCalculator.resolveEffectiveClass(student, courses)
+
+  // Filter exams for student as per admitted class, course, and batch
+  val studentExams = exams.filter { exam ->
+    if (!exam.isPublished) return@filter false
+
+    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, exam.academicClass)
+    val courseMatches = exam.courseId.isBlank() || exam.courseId.equals("all", ignoreCase = true) || exam.courseId == student.courseId
+    val batchMatches = exam.batchId.isBlank() || exam.batchId.equals("all", ignoreCase = true) || exam.batchId == student.batchId
+
+    // When exam specifies an explicit course, it must match student's admitted course
+    if (exam.courseId.isNotBlank() && !exam.courseId.equals("all", ignoreCase = true)) {
+      exam.courseId == student.courseId && batchMatches && classMatches
+    } else if (exam.batchId.isNotBlank() && !exam.batchId.equals("all", ignoreCase = true)) {
+      exam.batchId == student.batchId && classMatches
+    } else {
+      courseMatches && batchMatches && classMatches
+    }
+  }
   val studentSubmissions = submissions.filter { it.studentId == student.id }
 
   val currentExam = activeExamToTake

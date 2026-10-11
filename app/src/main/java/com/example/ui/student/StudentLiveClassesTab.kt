@@ -41,6 +41,7 @@ import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
 
 @Composable
 fun StudentLiveClassesTab(
@@ -56,18 +57,28 @@ fun StudentLiveClassesTab(
 
   var selectedView by remember { mutableStateOf("live") } // "live" or "recordings"
 
-  // Filter for student's batch, course or all-batch sessions
-  val studentLive = liveClasses.filter {
-    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
-    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  val courses by repository.courses.collectAsState()
+  val admittedClass = FeeCalculator.resolveEffectiveClass(student, courses)
+
+  // Filter for student's admitted class, course, or batch
+  val studentLive = liveClasses.filter { session ->
+    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, session.academicClass ?: session.targetClass)
+    val courseMatches = session.courseId.isBlank() || session.courseId.equals("all", ignoreCase = true) || session.courseId == student.courseId
+    val batchMatches = session.batchId.isBlank() || session.batchId.equals("all", ignoreCase = true) || session.batchId == student.batchId
+
+    // Session is visible if it matches student's exact batch/course AND does not conflict with their admitted class
+    (batchMatches && classMatches) || (courseMatches && classMatches)
   }
   val activeLive = studentLive.filter { it.status == "live" }
   val upcomingLive = studentLive.filter { it.status == "scheduled" }
   val postponedLive = studentLive.filter { it.status == "postponed" }
 
-  val studentRecordings = recordings.filter {
-    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
-    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  val studentRecordings = recordings.filter { rec ->
+    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, rec.academicClass)
+    val courseMatches = rec.courseId.isBlank() || rec.courseId.equals("all", ignoreCase = true) || rec.courseId == student.courseId
+    val batchMatches = rec.batchId.isBlank() || rec.batchId.equals("all", ignoreCase = true) || rec.batchId == student.batchId
+
+    (batchMatches && classMatches) || (courseMatches && classMatches)
   }
 
   // Request notifications permission on API 33+ and sync alarms

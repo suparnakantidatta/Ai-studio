@@ -28,6 +28,7 @@ import com.example.data.model.StudyMaterial
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.SectionHeader
 import com.example.ui.theme.*
+import com.example.util.FeeCalculator
 
 @Composable
 fun StudentMaterialsTab(
@@ -37,13 +38,28 @@ fun StudentMaterialsTab(
   val context = LocalContext.current
   val materials by repository.studyMaterials.collectAsState()
   val batches by repository.batches.collectAsState()
+  val courses by repository.courses.collectAsState()
 
   val studentBatch = batches.find { it.id == student.batchId }
+  val studentCourse = courses.find { it.id == student.courseId }
+  val admittedClass = FeeCalculator.resolveEffectiveClass(student, courses)
 
-  // Filter materials for this student's course or batch or all-batch materials
-  val studentMaterials = materials.filter {
-    it.batchId.isBlank() || it.batchId == "all" || it.batchId == student.batchId ||
-    it.courseId.isBlank() || it.courseId == "all" || it.courseId == student.courseId
+  // Filter materials for this student's admitted course, batch, or matching academic class
+  val studentMaterials = materials.filter { mat ->
+    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, mat.subject) ||
+      FeeCalculator.matchesAcademicClass(admittedClass, studentCourse?.academicClass)
+    val courseMatches = mat.courseId.isBlank() || mat.courseId.equals("all", ignoreCase = true) || mat.courseId == student.courseId
+    val batchMatches = mat.batchId.isBlank() || mat.batchId.equals("all", ignoreCase = true) || mat.batchId == student.batchId
+
+    // When material specifies a specific course, it must match student's admitted course
+    if (mat.courseId.isNotBlank() && !mat.courseId.equals("all", ignoreCase = true)) {
+      mat.courseId == student.courseId && batchMatches
+    } else if (mat.batchId.isNotBlank() && !mat.batchId.equals("all", ignoreCase = true)) {
+      mat.batchId == student.batchId
+    } else {
+      // General or all-batch material: verify against student's class
+      courseMatches && batchMatches && classMatches
+    }
   }
 
   LazyColumn(
