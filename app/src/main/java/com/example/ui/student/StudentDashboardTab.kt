@@ -65,11 +65,14 @@ fun StudentDashboardTab(
   val displayClass = FeeCalculator.resolveEffectiveClass(student, courses)
 
   val studentLive = liveClasses.filter { session ->
-    val classMatches = FeeCalculator.matchesAcademicClass(displayClass, session.academicClass ?: session.targetClass)
-    val courseMatches = session.courseId.isBlank() || session.courseId.equals("all", ignoreCase = true) || session.courseId == student.courseId
-    val batchMatches = session.batchId.isBlank() || session.batchId.equals("all", ignoreCase = true) || session.batchId == student.batchId
-
-    (batchMatches && classMatches) || (courseMatches && classMatches)
+    FeeCalculator.isItemForStudent(
+      student = student,
+      admittedClass = displayClass,
+      itemAcademicClass = session.academicClass ?: session.targetClass,
+      itemCourseId = session.courseId,
+      itemBatchId = session.batchId,
+      itemSubjectOrTitle = "${session.title} ${session.subject}"
+    )
   }
   val postponedLive = studentLive.filter { it.status == "postponed" }
   val nextLive = studentLive.firstOrNull { it.status == "scheduled" || it.status == "live" }
@@ -524,7 +527,7 @@ fun StudentDashboardTab(
               )
               Text(
                 text = "Standard: ₹${m.standardFee.toInt()}" +
-                  (if (m.discount > 0) " • Disc: -₹${m.discount.toInt()}" else "") +
+                  (if (m.discount > 0) " • Concession: -₹${m.discount.toInt()} (${m.discountTitle ?: "Fee Waiver"})" else "") +
                   " • Net: ₹${m.netPayable.toInt()}",
                 fontSize = 11.sp,
                 color = SlateTextSecondary

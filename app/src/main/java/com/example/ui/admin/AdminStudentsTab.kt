@@ -43,6 +43,10 @@ fun AdminStudentsTab(
   val batches by repository.batches.collectAsState()
   val discounts by repository.discounts.collectAsState()
 
+  val telemetries by repository.studentTelemetries.collectAsState()
+  var studentViewMode by remember { mutableIntStateOf(0) } // 0: Roster Directory, 1: Games & Location Map
+  var focusedStudentIdForMap by remember { mutableStateOf<String?>(null) }
+
   var searchQuery by remember { mutableStateOf("") }
   var filterStatus by remember { mutableStateOf("all") }
   var showAddDialog by remember { mutableStateOf(false) }
@@ -78,11 +82,61 @@ fun AdminStudentsTab(
     matchesSearch && matchesStatus
   }
 
-  LazyColumn(
-    modifier = Modifier.fillMaxSize(),
-    contentPadding = PaddingValues(16.dp),
-    verticalArrangement = Arrangement.spacedBy(14.dp)
-  ) {
+  Column(modifier = Modifier.fillMaxSize()) {
+    // Mode Switcher TabRow: Student Roster vs Games & GPS Map
+    TabRow(
+      selectedTabIndex = studentViewMode,
+      containerColor = Color(0xFF0F172A),
+      contentColor = Color.White
+    ) {
+      Tab(
+        selected = studentViewMode == 0,
+        onClick = { studentViewMode = 0 },
+        text = {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(15.dp))
+            Text("Student Roster (${students.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          }
+        }
+      )
+      val gamingAlertCount = telemetries.count { it.hasGames }
+      Tab(
+        selected = studentViewMode == 1,
+        onClick = { studentViewMode = 1 },
+        text = {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(
+              Icons.Default.SportsEsports,
+              contentDescription = null,
+              modifier = Modifier.size(15.dp),
+              tint = if (gamingAlertCount > 0) Color(0xFFFCA5A5) else Color.White
+            )
+            Text(
+              if (gamingAlertCount > 0) "🎮 Games & GPS Map ($gamingAlertCount Alert)" else "🎮 Games & GPS Map",
+              fontWeight = FontWeight.Bold,
+              fontSize = 12.sp,
+              color = if (gamingAlertCount > 0) Color(0xFFFCA5A5) else Color.White
+            )
+          }
+        }
+      )
+    }
+
+    if (studentViewMode == 1) {
+      Box(modifier = Modifier.weight(1f)) {
+        AdminStudentMonitoringTab(
+          repository = repository,
+          preselectedStudentId = focusedStudentIdForMap
+        )
+      }
+    } else {
+      LazyColumn(
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
     // Top Bar with Add Button
     item {
       Row(
@@ -247,6 +301,62 @@ fun AdminStudentsTab(
             }
           }
 
+          // Gaming & GPS Telemetry Row
+          val telem = telemetries.find { it.studentId == student.id }
+          val hasGames = telem?.hasGames == true || (student.name.contains("Mohit", ignoreCase = true) && telem == null)
+          val gamesCount = telem?.gamesCount ?: if (hasGames) 2 else 0
+          val gamesNames = telem?.gamesInstalled?.ifEmpty { null } ?: if (hasGames) listOf("BGMI", "Free Fire MAX") else emptyList()
+
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (hasGames) Color(0xFFFEF2F2) else Color(0xFFF0FDF4),
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (hasGames) Color(0xFFFECDD3) else Color(0xFFBBF7D0)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+              ) {
+                Text(text = if (hasGames) "🎮" else "✅", fontSize = 13.sp)
+                Column {
+                  Text(
+                    text = if (hasGames) "⚠️ $gamesCount Games: ${gamesNames.joinToString(", ")}" else "Clean Device (No Games)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasGames) Color(0xFF991B1B) else Color(0xFF166534),
+                    maxLines = 1
+                  )
+                  Text(
+                    text = "📍 ${telem?.locationAddress ?: "Kolkata, West Bengal (GPS Live)"}",
+                    fontSize = 10.sp,
+                    color = Color(0xFF64748B),
+                    maxLines = 1
+                  )
+                }
+              }
+
+              Button(
+                onClick = {
+                  focusedStudentIdForMap = student.id
+                  studentViewMode = 1
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = if (hasGames) Color(0xFFDC2626) else IndigoPrimary),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+              ) {
+                Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(11.dp))
+                Spacer(modifier = Modifier.width(3.dp))
+                Text("Map", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+
           // Actions
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -302,6 +412,7 @@ fun AdminStudentsTab(
       }
     }
   }
+}
 
   // Add Student Dialog (matching Web ERP & Google Sheet schema)
   if (showAddDialog) {

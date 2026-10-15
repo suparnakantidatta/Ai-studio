@@ -62,23 +62,28 @@ fun StudentLiveClassesTab(
 
   // Filter for student's admitted class, course, or batch
   val studentLive = liveClasses.filter { session ->
-    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, session.academicClass ?: session.targetClass)
-    val courseMatches = session.courseId.isBlank() || session.courseId.equals("all", ignoreCase = true) || session.courseId == student.courseId
-    val batchMatches = session.batchId.isBlank() || session.batchId.equals("all", ignoreCase = true) || session.batchId == student.batchId
-
-    // Session is visible if it matches student's exact batch/course AND does not conflict with their admitted class
-    (batchMatches && classMatches) || (courseMatches && classMatches)
+    FeeCalculator.isItemForStudent(
+      student = student,
+      admittedClass = admittedClass,
+      itemAcademicClass = session.academicClass ?: session.targetClass,
+      itemCourseId = session.courseId,
+      itemBatchId = session.batchId,
+      itemSubjectOrTitle = "${session.title} ${session.subject}"
+    )
   }
   val activeLive = studentLive.filter { it.status == "live" }
   val upcomingLive = studentLive.filter { it.status == "scheduled" }
   val postponedLive = studentLive.filter { it.status == "postponed" }
 
   val studentRecordings = recordings.filter { rec ->
-    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, rec.academicClass)
-    val courseMatches = rec.courseId.isBlank() || rec.courseId.equals("all", ignoreCase = true) || rec.courseId == student.courseId
-    val batchMatches = rec.batchId.isBlank() || rec.batchId.equals("all", ignoreCase = true) || rec.batchId == student.batchId
-
-    (batchMatches && classMatches) || (courseMatches && classMatches)
+    FeeCalculator.isItemForStudent(
+      student = student,
+      admittedClass = admittedClass,
+      itemAcademicClass = rec.academicClass,
+      itemCourseId = rec.courseId,
+      itemBatchId = rec.batchId,
+      itemSubjectOrTitle = "${rec.title} ${rec.subject} ${rec.topic}"
+    )
   }
 
   // Request notifications permission on API 33+ and sync alarms

@@ -642,6 +642,58 @@ class LocalDataStore(context: Context) {
         options = listOf("[0, 1, 4, 9]", "[1, 9]", "[0, 4]", "[1, 4]"),
         correctOptionIndex = 1,
         explanation = "range(4) produces 0, 1, 2, 3. The odd numbers are 1 and 3. Their squares are 1 and 9."
+      ),
+      ExamQuestion(
+        id = "q-12-1",
+        courseId = "course-2",
+        academicClass = "Class 12 (Science)",
+        subject = "Computer Science",
+        topic = "Boolean Algebra & Logic Gates",
+        marks = 2,
+        difficulty = "easy",
+        questionText = "According to De Morgan's Law, what is the equivalent of (A + B)' in Boolean algebra?",
+        options = listOf("A' . B'", "A' + B'", "(A . B)'", "A . B"),
+        correctOptionIndex = 0,
+        explanation = "De Morgan's theorem states that the complement of a sum of variables is equal to the product of their individual complements: (A + B)' = A' . B'."
+      ),
+      ExamQuestion(
+        id = "q-12-2",
+        courseId = "course-2",
+        academicClass = "Class 12 (Science)",
+        subject = "Computer Networks",
+        topic = "Network Topologies & OSI Model",
+        marks = 2,
+        difficulty = "medium",
+        questionText = "Which layer of the OSI 7-layer architecture is primarily responsible for end-to-end process communication and error recovery?",
+        options = listOf("Network Layer", "Transport Layer", "Data Link Layer", "Session Layer"),
+        correctOptionIndex = 1,
+        explanation = "The Transport layer (Layer 4, including TCP and UDP) manages end-to-end communication, flow control, and error recovery between processes."
+      ),
+      ExamQuestion(
+        id = "q-12-3",
+        courseId = "course-2",
+        academicClass = "Class 12 (Science)",
+        subject = "SQL & Relational Databases",
+        topic = "SQL Joins & Integrity Constraints",
+        marks = 2,
+        difficulty = "medium",
+        questionText = "Which type of SQL JOIN returns all rows from the left table and matching rows from the right table, filling nulls if no match?",
+        options = listOf("INNER JOIN", "LEFT OUTER JOIN", "CROSS JOIN", "FULL OUTER JOIN"),
+        correctOptionIndex = 1,
+        explanation = "A LEFT OUTER JOIN returns every record from the left table and corresponding records from the right table; unmatched right-side columns contain NULL."
+      ),
+      ExamQuestion(
+        id = "q-12-4",
+        courseId = "course-2",
+        academicClass = "Class 12 (Science)",
+        subject = "Data Structures & Algorithms",
+        topic = "Stacks and Queues",
+        marks = 2,
+        difficulty = "easy",
+        questionText = "What data structure principle does a standard FIFO queue follow?",
+        options = listOf("First In, First Out", "Last In, First Out", "Priority First", "Random Access"),
+        correctOptionIndex = 0,
+        explanation = "A Queue operates on the First In, First Out (FIFO) principle, where the first element inserted is the first to be removed."
       )
     )
 
@@ -665,6 +717,27 @@ class LocalDataStore(context: Context) {
         endTime = "11:00 AM",
         questionIds = listOf("q-1", "q-2", "q-3", "q-4"),
         instructions = "1. All 4 questions are compulsory.\n2. Each correct answer carries 2 marks.\n3. Negative marking: None.",
+        isPublished = true
+      ),
+      OnlineExam(
+        id = "exam-2",
+        examCode = "EXAM-CS12-202",
+        title = "Class 12 Computer Science: WBCHSE Board Model Test",
+        courseId = "course-2",
+        batchId = "batch-2",
+        academicClass = "Class 12 (Science)",
+        subject = "Computer Science (Class 12)",
+        durationMinutes = 25,
+        totalMarks = 8,
+        passingMarks = 4,
+        passingPercentage = 50,
+        status = "active",
+        mode = "online",
+        scheduledDate = "2026-09-08",
+        startTime = "11:00 AM",
+        endTime = "12:00 PM",
+        questionIds = listOf("q-12-1", "q-12-2", "q-12-3", "q-12-4"),
+        instructions = "1. Model test for Class 12 candidates.\n2. All 4 multiple-choice questions are compulsory.\n3. Each question carries 2 marks.",
         isPublished = true
       )
     )
@@ -714,6 +787,94 @@ class LocalDataStore(context: Context) {
       phone = "+91 9775708722",
       securityPin = "7722",
       status = "active"
+    )
+
+    val INITIAL_STUDENT_TELEMETRY = listOf(
+      StudentTelemetry(
+        id = "telem-1",
+        studentId = "stu-101",
+        studentName = "Mohit Das",
+        rollNo = "CS-XI-001",
+        studentClass = "Class 11 (Science)",
+        batchName = "XI-CS-A (Weekend)",
+        gamesInstalled = listOf("BGMI (Battlegrounds Mobile India)", "Free Fire MAX"),
+        gamesCount = 2,
+        hasGames = true,
+        latitude = 22.5726,
+        longitude = 88.3639,
+        locationAddress = "Salt Lake Sector V, Kolkata, West Bengal",
+        lastReportedTime = "2026-10-15 10:15:20",
+        deviceModel = "Samsung Galaxy M34 5G",
+        isOnline = true
+      ),
+      StudentTelemetry(
+        id = "telem-2",
+        studentId = "stu-102",
+        studentName = "Sneha Roy",
+        rollNo = "CS-XI-002",
+        studentClass = "Class 11 (Science)",
+        batchName = "XI-CS-A (Weekend)",
+        gamesInstalled = listOf("Candy Crush Saga"),
+        gamesCount = 1,
+        hasGames = true,
+        latitude = 22.5958,
+        longitude = 88.2636,
+        locationAddress = "Howrah Station Road, Howrah, West Bengal",
+        lastReportedTime = "2026-10-15 09:40:12",
+        deviceModel = "Redmi Note 12 Pro",
+        isOnline = true
+      ),
+      StudentTelemetry(
+        id = "telem-3",
+        studentId = "stu-103",
+        studentName = "Bibek Kundu",
+        rollNo = "CS-XII-001",
+        studentClass = "Class 12 (Science)",
+        batchName = "XII-CS-Alpha",
+        gamesInstalled = emptyList(),
+        gamesCount = 0,
+        hasGames = false,
+        latitude = 22.5850,
+        longitude = 88.4720,
+        locationAddress = "New Town Action Area I, Kolkata, West Bengal",
+        lastReportedTime = "2026-10-15 10:30:00",
+        deviceModel = "OnePlus Nord CE 3",
+        isOnline = true
+      ),
+      StudentTelemetry(
+        id = "telem-4",
+        studentId = "stu-104",
+        studentName = "Priya Sharma",
+        rollNo = "CS-X-001",
+        studentClass = "Class 10 (Secondary)",
+        batchName = "X-Foundation-Code",
+        gamesInstalled = listOf("Ludo King", "Subway Surfers"),
+        gamesCount = 2,
+        hasGames = true,
+        latitude = 22.5180,
+        longitude = 88.3832,
+        locationAddress = "Ballygunge Phari, Kolkata, West Bengal",
+        lastReportedTime = "2026-10-15 08:55:40",
+        deviceModel = "Realme Narzo 60x",
+        isOnline = false
+      ),
+      StudentTelemetry(
+        id = "telem-5",
+        studentId = "stu-105",
+        studentName = "Amit Kumar",
+        rollNo = "CS-XI-003",
+        studentClass = "Class 11 (Science)",
+        batchName = "XI-CS-A (Weekend)",
+        gamesInstalled = emptyList(),
+        gamesCount = 0,
+        hasGames = false,
+        latitude = 22.6230,
+        longitude = 88.4350,
+        locationAddress = "Dum Dum Park, Kolkata, West Bengal",
+        lastReportedTime = "2026-10-15 10:05:15",
+        deviceModel = "Vivo T2x 5G",
+        isOnline = true
+      )
     )
   }
 
@@ -839,6 +1000,21 @@ class LocalDataStore(context: Context) {
   fun getAdminAccount(): AdminAccount = getObject("admin_account", INITIAL_ADMIN)
   fun saveAdminAccount(admin: AdminAccount) = putObject("admin_account", admin)
 
+  // Student Device Telemetry & Gaming Detection Table (Automatically created in DB)
+  fun getStudentTelemetries(): List<StudentTelemetry> = getList("student_device_telemetry_table", INITIAL_STUDENT_TELEMETRY)
+  fun saveStudentTelemetries(list: List<StudentTelemetry>) = putList("student_device_telemetry_table", list)
+
+  fun updateOrAddStudentTelemetry(telemetry: StudentTelemetry) {
+    val current = getStudentTelemetries().toMutableList()
+    val index = current.indexOfFirst { it.studentId == telemetry.studentId }
+    if (index >= 0) {
+      current[index] = telemetry
+    } else {
+      current.add(0, telemetry)
+    }
+    saveStudentTelemetries(current)
+  }
+
   // Save entire dataset snapshot
   fun saveAll(dto: DatabaseDataDto) {
     dto.centerInfo?.let { saveCenterInfo(it) }
@@ -855,6 +1031,7 @@ class LocalDataStore(context: Context) {
     dto.exams?.let { saveExams(it) }
     dto.questions?.let { saveQuestions(it) }
     dto.examSubmissions?.let { saveExamSubmissions(it) }
+    dto.studentTelemetries?.let { saveStudentTelemetries(it) }
     dto.adminAccounts?.firstOrNull()?.let { saveAdminAccount(it) }
   }
 
@@ -874,6 +1051,7 @@ class LocalDataStore(context: Context) {
       exams = getExams(),
       questions = getQuestions(),
       examSubmissions = getExamSubmissions(),
+      studentTelemetries = getStudentTelemetries(),
       adminAccounts = listOf(getAdminAccount())
     )
   }

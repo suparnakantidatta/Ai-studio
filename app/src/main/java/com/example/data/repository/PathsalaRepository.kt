@@ -78,6 +78,9 @@ class PathsalaRepository(private val context: Context) {
   private val _submissions = MutableStateFlow(localStore.getExamSubmissions())
   val submissions: StateFlow<List<ExamSubmission>> = _submissions.asStateFlow()
 
+  private val _studentTelemetries = MutableStateFlow(localStore.getStudentTelemetries())
+  val studentTelemetries: StateFlow<List<StudentTelemetry>> = _studentTelemetries.asStateFlow()
+
   private val _currentStudent = MutableStateFlow<Student?>(localStore.getLoggedInStudent())
   val currentStudent: StateFlow<Student?> = _currentStudent.asStateFlow()
 
@@ -199,6 +202,7 @@ class PathsalaRepository(private val context: Context) {
             dto.exams?.let { if (it.isNotEmpty()) _exams.value = it }
             dto.questions?.let { if (it.isNotEmpty()) _questions.value = it }
             dto.examSubmissions?.let { if (it.isNotEmpty()) _submissions.value = it }
+            dto.studentTelemetries?.let { if (it.isNotEmpty()) _studentTelemetries.value = it }
             dto.adminAccounts?.firstOrNull()?.let {
               localStore.saveAdminAccount(it)
               if (_currentAdmin.value != null) {
@@ -815,6 +819,41 @@ class PathsalaRepository(private val context: Context) {
     }
   }
 
+  fun addOrUpdateDiscount(discount: Discount) {
+    val existing = _discounts.value
+    val updated = if (existing.any { it.id == discount.id }) {
+      existing.map { if (it.id == discount.id) discount else it }
+    } else {
+      listOf(discount) + existing
+    }
+    _discounts.value = updated
+    localStore.saveDiscounts(updated)
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushDiscountsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Error pushing discounts update: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteDiscount(discountId: String) {
+    val updated = _discounts.value.filter { it.id != discountId }
+    _discounts.value = updated
+    localStore.saveDiscounts(updated)
+    scope.launch(Dispatchers.IO) {
+      try {
+        GoogleSheetSyncService.pushDiscountsTable(updated)
+        _connectionStatus.value = "Google Sheet Synced"
+        _lastSyncTime.value = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+      } catch (e: Exception) {
+        android.util.Log.e("PathsalaRepository", "Error pushing discounts deletion: ${e.message}")
+      }
+    }
+  }
+
   fun deleteStudent(studentId: String) {
     val updated = _students.value.filter { it.id != studentId }
     _students.value = updated
@@ -1086,5 +1125,41 @@ class PathsalaRepository(private val context: Context) {
     }
 
     return submission
+  }
+
+  /**
+   * Records student device telemetry (installed gaming apps, real-time location, device info)
+   * into the database table, updating both local store and state flows.
+   */
+  fun recordStudentTelemetry(
+    student: Student,
+    games: List<String>,
+    lat: Double?,
+    lng: Double?,
+    address: String?,
+    deviceModel: String = android.os.Build.MODEL ?: "Android Device"
+  ) {
+    val currentList = _studentTelemetries.value
+    val existing = currentList.find { it.studentId == student.id }
+    val record = StudentTelemetry(
+      id = existing?.id ?: "telem-${System.currentTimeMillis()}",
+      studentId = student.id,
+      studentName = student.name,
+      rollNo = student.rollNo,
+      studentClass = student.studentClass,
+      batchName = batches.value.find { it.id == student.batchId }?.name ?: student.batchId,
+      gamesInstalled = games,
+      gamesCount = games.size,
+      hasGames = games.isNotEmpty(),
+      latitude = lat ?: existing?.latitude ?: 22.5726,
+      longitude = lng ?: existing?.longitude ?: 88.3639,
+      locationAddress = address ?: existing?.locationAddress ?: "Salt Lake, Kolkata, West Bengal",
+      lastReportedTime = com.example.util.StudentDeviceMonitor.getCurrentTimestamp(),
+      deviceModel = deviceModel,
+      isOnline = true
+    )
+    localStore.updateOrAddStudentTelemetry(record)
+    _studentTelemetries.value = localStore.getStudentTelemetries()
+    android.util.Log.d("PathsalaRepository", "Saved telemetry for student ${student.name}: ${games.size} games, location: $address")
   }
 }

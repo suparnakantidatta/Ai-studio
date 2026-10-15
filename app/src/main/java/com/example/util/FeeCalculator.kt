@@ -144,17 +144,19 @@ object FeeCalculator {
       }
       if (!scopeMatches) continue
 
-      // Month match
-      val monthMatches = when {
-        d.applicableMonthsType.equals("selected_months", ignoreCase = true) && !d.selectedMonths.isNullOrEmpty() -> {
-          if (monthKey == null && monthLabel == null) true
-          else d.selectedMonths.any { sm ->
-            (monthKey != null && sm.contains(monthKey, ignoreCase = true)) ||
-            (monthLabel != null && sm.contains(monthLabel, ignoreCase = true)) ||
-            (monthKey != null && monthKey.contains(sm, ignoreCase = true))
-          }
+      // Month match (handles all_months, single_month, selected_months, and ISO date strings)
+      val isSpecificMonths = d.applicableMonthsType.equals("selected_months", ignoreCase = true) ||
+        d.applicableMonthsType.equals("single_month", ignoreCase = true) ||
+        d.applicableMonthsType.equals("specific_months", ignoreCase = true)
+
+      val monthMatches = if (isSpecificMonths) {
+        if (d.selectedMonths.isNullOrEmpty()) {
+          true
+        } else {
+          d.selectedMonths.any { sm -> matchesSelectedMonth(monthKey, monthLabel, sm) }
         }
-        else -> true // "all_months"
+      } else {
+        true // "all_months"
       }
       if (!monthMatches) continue
 
@@ -183,6 +185,40 @@ object FeeCalculator {
         title = explicitTitle
       )
     }
+  }
+
+  /**
+   * Matches a target billing month (e.g. "2026-10" or "October 2026")
+   * against a selected month string (which may be ISO timestamp, "2026-10", or "October 2026").
+   */
+  fun matchesSelectedMonth(targetMonthKey: String?, targetMonthLabel: String?, selectedMonthStr: String): Boolean {
+    if (targetMonthKey == null && targetMonthLabel == null) return true
+    val clean = selectedMonthStr.trim().replace("\"", "").replace("'", "")
+    if (clean.isBlank()) return true
+
+    if (targetMonthKey != null && (clean.contains(targetMonthKey, ignoreCase = true) || targetMonthKey.contains(clean, ignoreCase = true))) {
+      return true
+    }
+    if (targetMonthLabel != null && (clean.contains(targetMonthLabel, ignoreCase = true) || targetMonthLabel.contains(clean, ignoreCase = true))) {
+      return true
+    }
+
+    val localDate = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(clean)
+    if (localDate.isNotBlank()) {
+      val (y, m) = parseAdmissionYearMonth(localDate)
+      val convertedKey = String.format(Locale.ROOT, "%04d-%02d", y, m)
+      val convertedLabel = "${MONTH_NAMES[m]} $y"
+      if (targetMonthKey != null && targetMonthKey == convertedKey) return true
+      if (targetMonthLabel != null && targetMonthLabel.equals(convertedLabel, ignoreCase = true)) return true
+    }
+
+    val (y, m) = parseAdmissionYearMonth(clean)
+    val convertedKey = String.format(Locale.ROOT, "%04d-%02d", y, m)
+    val convertedLabel = "${MONTH_NAMES[m]} $y"
+    if (targetMonthKey != null && targetMonthKey == convertedKey) return true
+    if (targetMonthLabel != null && targetMonthLabel.equals(convertedLabel, ignoreCase = true)) return true
+
+    return false
   }
 
   /**
@@ -515,5 +551,67 @@ object FeeCalculator {
       ?: explicit?.takeIf { it.isNotBlank() }
       ?: matchingCourse?.title?.takeIf { it.isNotBlank() }
       ?: "Class 12"
+  }
+
+  /**
+   * Universal filter to determine if an academic item (live class, recording, study material, online exam)
+   * should be visible to a student based on their admitted class, course, and batch.
+   */
+  fun isItemForStudent(
+    student: Student,
+    admittedClass: String?,
+    itemAcademicClass: String?,
+    itemCourseId: String?,
+    itemBatchId: String?,
+    itemSubjectOrTitle: String? = null
+  ): Boolean {
+    // 1. Direct course ID match or batch ID match
+    if (!itemCourseId.isNullOrBlank() && !itemCourseId.equals("all", ignoreCase = true) && itemCourseId == student.courseId) {
+      return true
+    }
+    if (!itemBatchId.isNullOrBlank() && !itemBatchId.equals("all", ignoreCase = true) && itemBatchId == student.batchId) {
+      return true
+    }
+
+    // 2. Class specification match
+    val hasExplicitClass = !itemAcademicClass.isNullOrBlank() &&
+      !itemAcademicClass.equals("all", ignoreCase = true) &&
+      !itemAcademicClass.equals("all classes", ignoreCase = true) &&
+      !itemAcademicClass.equals("general", ignoreCase = true)
+
+    if (hasExplicitClass) {
+      return matchesAcademicClass(admittedClass, itemAcademicClass)
+    }
+
+    // 3. Subject or title class match (e.g. "Class 12 Physics", "Class 11 Python")
+    if (!itemSubjectOrTitle.isNullOrBlank()) {
+      val titleLower = itemSubjectOrTitle.lowercase(Locale.ROOT)
+      val sNorm = admittedClass?.lowercase(Locale.ROOT) ?: ""
+      val sDigits = Regex("\\d+").findAll(sNorm).map { it.value }.toList()
+      val titleDigits = Regex("(?:class|grade|std)\\s*(\\d+)", RegexOption.IGNORE_CASE)
+        .findAll(titleLower)
+        .map { it.groupValues[1] }
+        .toList()
+
+      if (sDigits.isNotEmpty() && titleDigits.isNotEmpty()) {
+        return sDigits.any { it in titleDigits }
+      }
+    }
+
+    // 4. If course/batch is marked for "all" or blank, and no conflicting class is specified
+    val isGeneralScope = (itemCourseId.isNullOrBlank() || itemCourseId.equals("all", ignoreCase = true)) &&
+      (itemBatchId.isNullOrBlank() || itemBatchId.equals("all", ignoreCase = true))
+
+    if (isGeneralScope) {
+      return true
+    }
+
+    // 5. Legacy course mappings (course-1 -> Class 11, course-2 -> Class 12, course-3 -> Class 10)
+    val normClass = admittedClass?.lowercase(Locale.ROOT) ?: ""
+    if (normClass.contains("11") && (itemCourseId == "course-1" || itemBatchId == "batch-1")) return true
+    if (normClass.contains("12") && (itemCourseId == "course-2" || itemBatchId == "batch-2")) return true
+    if (normClass.contains("10") && (itemCourseId == "course-3" || itemBatchId == "batch-3")) return true
+
+    return false
   }
 }

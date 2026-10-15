@@ -1551,4 +1551,49 @@ object GoogleSheetSyncService {
 
     return postToWebhook(json.toString())
   }
+
+  fun pushDiscountsTable(discounts: List<Discount>): Boolean {
+    val headers = listOf(
+      "Discount ID", "Discount Title", "Discount Type (flat/percentage)", "Value (₹ / %)",
+      "Scope (all/class/course/batch/student)", "Target Academic Class", "Target Course ID",
+      "Target Batch ID", "Target Student ID", "Applicable Months Type", "Selected Months",
+      "Reason / Description", "Active Status", "Created At"
+    )
+    val rows = mutableListOf<List<Any?>>()
+    rows.add(headers)
+    for (d in discounts) {
+      rows.add(
+        listOf(
+          d.id,
+          d.title,
+          d.type,
+          d.value,
+          d.scope,
+          d.academicClass ?: "",
+          d.courseId ?: "",
+          d.batchId ?: "",
+          d.studentId ?: "",
+          d.applicableMonthsType,
+          d.selectedMonths?.joinToString(", ") ?: "",
+          d.reason ?: "",
+          if (d.active) "Active" else "Inactive",
+          getCurrentIstDate()
+        )
+      )
+    }
+
+    val json = JSONObject()
+    json.put("action", "saveAll")
+    val tables = JSONObject()
+    val arr = JSONArray()
+    for (row in rows) {
+      val rowArr = JSONArray()
+      row.forEach { rowArr.put(it ?: "") }
+      arr.put(rowArr)
+    }
+    tables.put("Discounts", arr)
+    json.put("tables", tables)
+
+    return postToWebhook(json.toString())
+  }
 }

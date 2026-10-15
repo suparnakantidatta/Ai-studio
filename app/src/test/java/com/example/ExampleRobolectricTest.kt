@@ -498,4 +498,89 @@ class ExampleRobolectricTest {
     assertTrue(summary.monthsElapsed.first().isPaid)
     assertTrue(!summary.monthsElapsed[1].isPaid)
   }
+
+  @Test
+  fun `batch and single-month database discounts apply accurately to student dues`() {
+    val student1 = com.example.data.model.Student(
+      id = "stu-101",
+      rollNo = "PP-01",
+      name = "Student One",
+      mobile = "9876543210",
+      aadhaarNo = "123456789012",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-08-01"
+    )
+
+    val student2 = com.example.data.model.Student(
+      id = "stu-102",
+      rollNo = "PP-02",
+      name = "Student Two",
+      mobile = "9876543211",
+      aadhaarNo = "123456789013",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-08-01"
+    )
+
+    val course = com.example.data.model.Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+    val batch = com.example.data.model.Batch(id = "batch-1", name = "Morning Batch", courseId = "course-1")
+
+    // Batch discount: ₹50 for all months to all batch students
+    val batchDisc = com.example.data.model.Discount(
+      id = "disc-b1",
+      title = "Batch Discount",
+      type = "flat",
+      value = 50.0,
+      scope = "batch",
+      batchId = "batch-1",
+      applicableMonthsType = "all_months",
+      active = true
+    )
+
+    // Single-month discount: ₹100 for student1 in October 2026 only
+    val singleMonthDisc = com.example.data.model.Discount(
+      id = "disc-s1",
+      title = "October Special",
+      type = "flat",
+      value = 100.0,
+      scope = "student",
+      studentId = "stu-101",
+      applicableMonthsType = "single_month",
+      selectedMonths = listOf("October 2026"),
+      active = true
+    )
+
+    val discounts = listOf(batchDisc, singleMonthDisc)
+
+    val summary1 = com.example.util.FeeCalculator.calculateStudentFeeSummary(
+      student = student1,
+      courses = listOf(course),
+      batches = listOf(batch),
+      allPayments = emptyList(),
+      discounts = discounts
+    )
+
+    val summary2 = com.example.util.FeeCalculator.calculateStudentFeeSummary(
+      student = student2,
+      courses = listOf(course),
+      batches = listOf(batch),
+      allPayments = emptyList(),
+      discounts = discounts
+    )
+
+    // Student2 only gets batch discount (₹50 off standard ₹400 = ₹350/mo)
+    val s2Aug = summary2.monthsElapsed.find { it.monthKey == "2026-08" }
+    assertEquals(50.0, s2Aug?.discount ?: 0.0, 0.01)
+    assertEquals(350.0, s2Aug?.netPayable ?: 0.0, 0.01)
+
+    // Student1 gets ₹50 off in August & September, and ₹100 in October
+    val s1Aug = summary1.monthsElapsed.find { it.monthKey == "2026-08" }
+    assertEquals(50.0, s1Aug?.discount ?: 0.0, 0.01)
+    assertEquals(350.0, s1Aug?.netPayable ?: 0.0, 0.01)
+
+    val s1Oct = summary1.monthsElapsed.find { it.monthKey == "2026-10" }
+    assertEquals(100.0, s1Oct?.discount ?: 0.0, 0.01)
+    assertEquals(300.0, s1Oct?.netPayable ?: 0.0, 0.01)
+  }
 }

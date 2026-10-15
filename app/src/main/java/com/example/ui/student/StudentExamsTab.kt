@@ -52,19 +52,14 @@ fun StudentExamsTab(
   // Filter exams for student as per admitted class, course, and batch
   val studentExams = exams.filter { exam ->
     if (!exam.isPublished) return@filter false
-
-    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, exam.academicClass)
-    val courseMatches = exam.courseId.isBlank() || exam.courseId.equals("all", ignoreCase = true) || exam.courseId == student.courseId
-    val batchMatches = exam.batchId.isBlank() || exam.batchId.equals("all", ignoreCase = true) || exam.batchId == student.batchId
-
-    // When exam specifies an explicit course, it must match student's admitted course
-    if (exam.courseId.isNotBlank() && !exam.courseId.equals("all", ignoreCase = true)) {
-      exam.courseId == student.courseId && batchMatches && classMatches
-    } else if (exam.batchId.isNotBlank() && !exam.batchId.equals("all", ignoreCase = true)) {
-      exam.batchId == student.batchId && classMatches
-    } else {
-      courseMatches && batchMatches && classMatches
-    }
+    FeeCalculator.isItemForStudent(
+      student = student,
+      admittedClass = admittedClass,
+      itemAcademicClass = exam.academicClass,
+      itemCourseId = exam.courseId,
+      itemBatchId = exam.batchId,
+      itemSubjectOrTitle = "${exam.title} ${exam.subject}"
+    )
   }
   val studentSubmissions = submissions.filter { it.studentId == student.id }
 

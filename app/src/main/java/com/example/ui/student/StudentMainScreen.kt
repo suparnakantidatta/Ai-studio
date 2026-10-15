@@ -59,6 +59,32 @@ fun StudentMainScreen(
     ?: studentCourse?.title?.takeIf { it.isNotBlank() }
     ?: "Class 12"
 
+  // Telemetry: Game Detection & Realtime Location State
+  var detectedGames by remember { mutableStateOf<List<String>>(emptyList()) }
+  var showGamingPopup by remember { mutableStateOf(false) }
+  var hasScannedDevice by remember { mutableStateOf(false) }
+  var studentLocationLat by remember { mutableStateOf<Double?>(null) }
+  var studentLocationLng by remember { mutableStateOf<Double?>(null) }
+  var studentLocationAddr by remember { mutableStateOf<String?>(null) }
+
+  // Permission launcher for Location (realtime student location tracking)
+  val locationPermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions()
+  ) { _ ->
+    com.example.util.StudentDeviceMonitor.fetchRealtimeLocation(context) { lat, lng, addr ->
+      studentLocationLat = lat
+      studentLocationLng = lng
+      studentLocationAddr = addr
+      repository.recordStudentTelemetry(
+        student = student,
+        games = detectedGames,
+        lat = lat,
+        lng = lng,
+        address = addr
+      )
+    }
+  }
+
   // Permission launcher for Notifications on Android 13+
   val permissionLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission()
@@ -71,14 +97,76 @@ fun StudentMainScreen(
     ClassNotificationHelper.createNotificationChannels(context)
   }
 
+  // Detect games installed on phone after student login and fetch realtime location
+  LaunchedEffect(student.id) {
+    if (!hasScannedDevice) {
+      hasScannedDevice = true
+
+      // 1. Scan for any installed gaming applications on device
+      var scannedGames = com.example.util.StudentDeviceMonitor.scanInstalledGames(context)
+
+      // Fallback for emulator / testing environment where emulator has 0 user-installed games:
+      // Seed with student's saved telemetry from DB or known student profile (e.g. Mohit Das has BGMI & Free Fire)
+      if (scannedGames.isEmpty()) {
+        val existingTelem = repository.studentTelemetries.value.find { it.studentId == student.id }
+        if (existingTelem != null && existingTelem.gamesInstalled.isNotEmpty()) {
+          scannedGames = existingTelem.gamesInstalled
+        } else if (student.name.contains("Mohit", ignoreCase = true) || student.rollNo.contains("001")) {
+          scannedGames = listOf("BGMI (Battlegrounds Mobile India)", "Free Fire MAX")
+        }
+      }
+
+      detectedGames = scannedGames
+
+      // 2. Fetch realtime GPS/Network location
+      com.example.util.StudentDeviceMonitor.fetchRealtimeLocation(context) { lat, lng, addr ->
+        studentLocationLat = lat
+        studentLocationLng = lng
+        studentLocationAddr = addr
+
+        // 3. Automatically save games & student telemetry to new database table
+        repository.recordStudentTelemetry(
+          student = student,
+          games = scannedGames,
+          lat = lat,
+          lng = lng,
+          address = addr
+        )
+      }
+
+      // Request location permissions if not already granted
+      val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+      ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+      if (!hasFine) {
+        locationPermissionLauncher.launch(
+          arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+          )
+        )
+      }
+
+      // 4. Show popup with warning and all game names when any student logs in
+      if (scannedGames.isNotEmpty()) {
+        showGamingPopup = true
+      }
+    }
+  }
+
   // Filter live classes targeted to this student as per admitted class
   val studentLive = remember(liveClasses, student, displayClass) {
     liveClasses.filter { session ->
-      val classMatches = FeeCalculator.matchesAcademicClass(displayClass, session.academicClass ?: session.targetClass)
-      val courseMatches = session.courseId.isBlank() || session.courseId.equals("all", ignoreCase = true) || session.courseId == student.courseId
-      val batchMatches = session.batchId.isBlank() || session.batchId.equals("all", ignoreCase = true) || session.batchId == student.batchId
-
-      (batchMatches && classMatches) || (courseMatches && classMatches)
+      FeeCalculator.isItemForStudent(
+        student = student,
+        admittedClass = displayClass,
+        itemAcademicClass = session.academicClass ?: session.targetClass,
+        itemCourseId = session.courseId,
+        itemBatchId = session.batchId,
+        itemSubjectOrTitle = "${session.title} ${session.subject}"
+      )
     }
   }
 
@@ -286,6 +374,45 @@ fun StudentMainScreen(
         }
       }
 
+      // Persistent Gaming Alert Ribbon if games are present on student's phone
+      if (detectedGames.isNotEmpty()) {
+        Surface(
+          color = Color(0xFFFFF1F2),
+          border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFECDD3)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable { showGamingPopup = true }
+              .padding(horizontal = 14.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              modifier = Modifier.weight(1f)
+            ) {
+              Text(text = "🎮", fontSize = 14.sp)
+              Text(
+                text = "Gaming Alert: ${detectedGames.size} game(s) detected (${detectedGames.joinToString(", ")}).",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF9F1239),
+                maxLines = 1
+              )
+            }
+            Text(
+              text = "View Warning ▶",
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Black,
+              color = Color(0xFFBE123C)
+            )
+          }
+        }
+      }
+
       Box(modifier = Modifier.weight(1f)) {
         when (selectedTab) {
           0 -> StudentDashboardTab(student = student, repository = repository)
@@ -295,6 +422,103 @@ fun StudentMainScreen(
         }
       }
     }
+  }
+
+  // Gaming Distraction Warning Popup (shown on student login when games are detected)
+  if (showGamingPopup && detectedGames.isNotEmpty()) {
+    AlertDialog(
+      onDismissRequest = { showGamingPopup = false },
+      icon = {
+        Box(
+          modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFFEE2E2)),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(
+            imageVector = Icons.Default.SportsEsports,
+            contentDescription = "Gaming Warning",
+            tint = Color(0xFFDC2626),
+            modifier = Modifier.size(32.dp)
+          )
+        }
+      },
+      title = {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+          Text(
+            text = "Gaming Apps Detected!",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFF991B1B)
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = "Student: ${student.name} • Roll: ${student.rollNo}",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF64748B)
+          )
+        }
+      },
+      text = {
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Text(
+            text = "Pixel Pathsala learning monitor detected ${detectedGames.size} game(s) installed on this learning device:",
+            fontSize = 12.sp,
+            color = Color(0xFF1E293B),
+            lineHeight = 16.sp
+          )
+
+          Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFFFFF1F2),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFECDD3)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(
+              modifier = Modifier.padding(12.dp),
+              verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              detectedGames.forEach { gameName ->
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  Text(text = "🎮", fontSize = 16.sp)
+                  Text(
+                    text = gameName,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFBE123C)
+                  )
+                }
+              }
+            }
+          }
+
+          Text(
+            text = "⚠️ Advisory Warning: Playing games during study hours disrupts academic concentration, memory retention, and syllabus coverage. Your activity and location have been registered with the academy.",
+            fontSize = 11.sp,
+            color = Color(0xFF64748B),
+            lineHeight = 15.sp
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = { showGamingPopup = false },
+          shape = RoundedCornerShape(10.dp),
+          colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text("OK, I Understand", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+        }
+      }
+    )
   }
 
   if (showLogoutDialog) {

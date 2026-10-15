@@ -44,6 +44,8 @@ fun AdminDashboardTab(
   val batches by repository.batches.collectAsState()
   val liveClasses by repository.liveClasses.collectAsState()
   val centerInfo by repository.centerInfo.collectAsState()
+  val telemetries by repository.studentTelemetries.collectAsState()
+  val studentsWithGamesCount = telemetries.count { it.hasGames }
 
   val activeStudents = students.filter { it.status == "active" }
   val pendingPayments = payments.filter { it.status == "pending" }

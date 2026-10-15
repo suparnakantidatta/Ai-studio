@@ -46,20 +46,14 @@ fun StudentMaterialsTab(
 
   // Filter materials for this student's admitted course, batch, or matching academic class
   val studentMaterials = materials.filter { mat ->
-    val classMatches = FeeCalculator.matchesAcademicClass(admittedClass, mat.subject) ||
-      FeeCalculator.matchesAcademicClass(admittedClass, studentCourse?.academicClass)
-    val courseMatches = mat.courseId.isBlank() || mat.courseId.equals("all", ignoreCase = true) || mat.courseId == student.courseId
-    val batchMatches = mat.batchId.isBlank() || mat.batchId.equals("all", ignoreCase = true) || mat.batchId == student.batchId
-
-    // When material specifies a specific course, it must match student's admitted course
-    if (mat.courseId.isNotBlank() && !mat.courseId.equals("all", ignoreCase = true)) {
-      mat.courseId == student.courseId && batchMatches
-    } else if (mat.batchId.isNotBlank() && !mat.batchId.equals("all", ignoreCase = true)) {
-      mat.batchId == student.batchId
-    } else {
-      // General or all-batch material: verify against student's class
-      courseMatches && batchMatches && classMatches
-    }
+    FeeCalculator.isItemForStudent(
+      student = student,
+      admittedClass = admittedClass,
+      itemAcademicClass = null,
+      itemCourseId = mat.courseId,
+      itemBatchId = mat.batchId,
+      itemSubjectOrTitle = "${mat.title} ${mat.subject ?: ""} ${mat.description ?: ""}"
+    )
   }
 
   LazyColumn(

@@ -365,7 +365,8 @@ data class DatabaseDataDto(
   val exams: List<OnlineExam>? = null,
   val examSubmissions: List<ExamSubmission>? = null,
   val liveClasses: List<LiveClassSession>? = null,
-  val classRecordings: List<ClassRecording>? = null
+  val classRecordings: List<ClassRecording>? = null,
+  val studentTelemetries: List<StudentTelemetry>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -429,3 +430,30 @@ data class StudentFeesResponse(
   val payments: List<FeePayment> = emptyList(),
   val dueMonths: List<String> = emptyList()
 )
+
+@JsonClass(generateAdapter = true)
+data class StudentGameInfo(
+  val name: String,
+  val packageName: String = "",
+  val detectedAt: String = ""
+)
+
+@JsonClass(generateAdapter = true)
+data class StudentTelemetry(
+  val id: String,
+  val studentId: String,
+  val studentName: String,
+  val rollNo: String? = null,
+  val studentClass: String? = null,
+  val batchName: String? = null,
+  val gamesInstalled: List<String> = emptyList(),
+  val gamesCount: Int = 0,
+  val hasGames: Boolean = false,
+  val latitude: Double? = null,
+  val longitude: Double? = null,
+  val locationAddress: String? = null,
+  val lastReportedTime: String = "",
+  val deviceModel: String = "",
+  val isOnline: Boolean = true
+)
+
