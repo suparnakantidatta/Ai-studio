@@ -523,7 +523,7 @@ class ExampleRobolectricTest {
       admissionDate = "2026-08-01"
     )
 
-    val course = com.example.data.model.Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+    val course = com.example.data.model.Course(id = "course-1", title = "CS", code = "CS-01", monthlyFee = 400.0)
     val batch = com.example.data.model.Batch(id = "batch-1", name = "Morning Batch", courseId = "course-1")
 
     // Batch discount: ₹50 for all months to all batch students

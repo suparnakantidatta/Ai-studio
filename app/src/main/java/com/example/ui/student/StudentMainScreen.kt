@@ -8,8 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +29,7 @@ import com.example.alarm.ClassAlarmAudioPlayer
 import com.example.alarm.ClassAlarmManager
 import com.example.alarm.ClassNotificationHelper
 import com.example.data.model.Student
+import com.example.data.model.StudentTelemetry
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.CenterLogo
 import com.example.ui.theme.*

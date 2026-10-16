@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.Student
+import com.example.data.model.StudentTelemetry
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.StatusBadge
@@ -993,4 +994,5 @@ fun AdminStudentsTab(
       }
     )
   }
+}
 }

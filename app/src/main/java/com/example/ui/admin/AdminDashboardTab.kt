@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.FeePayment
+import com.example.data.model.StudentTelemetry
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.components.MetricCard
 import com.example.ui.components.ReceiptDialog

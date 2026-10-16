@@ -18,6 +18,7 @@ import com.example.data.model.FeePayment
 import com.example.data.model.LiveClassSession
 import com.example.data.model.OnlineExam
 import com.example.data.model.Student
+import com.example.data.model.StudentTelemetry
 import com.example.data.model.StudyMaterial
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
