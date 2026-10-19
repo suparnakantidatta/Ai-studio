@@ -1,167 +1,158 @@
 package com.example.util
 
-import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.location.Address
-import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.BatteryManager
 import android.os.Build
-import android.util.Log
-import androidx.core.content.ContextCompat
+import com.example.data.model.Student
+import com.example.data.model.StudentTelemetry
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 
 object StudentDeviceMonitor {
-  private const val TAG = "StudentDeviceMonitor"
 
-  // Common gaming keywords and known mobile game identifiers
-  private val KNOWN_GAME_IDENTIFIERS = listOf(
-    "game", "gaming", "pubg", "freefire", "bgmi", "clash", "brawl",
-    "roblox", "minecraft", "subway", "asphalt", "candycrush", "ludo",
-    "chess", "carrom", "fortnite", "codm", "callofduty", "garena",
-    "krafton", "supercell", "gameloft", "miniclip", "rovio", "king.com",
-    "genshin", "honkai", "shadowfight", "templerun", "angrybirds",
-    "amongus", "hillclimb", "dreamleague", "fifa", "pes", "efootball",
-    "fruitninja", "talkingtom", "pou", "geometrydash", "crossyroad",
-    "battlegrounds", "free fire", "candy crush", "ludo king"
+  // Popular games & entertainment apps checked for study focus monitoring
+  val POPULAR_GAME_PACKAGES = mapOf(
+    "com.dts.freefireth" to "Free Fire",
+    "com.dts.freefiremax" to "Free Fire MAX",
+    "com.pubg.imobile" to "BGMI (Battlegrounds Mobile)",
+    "com.roblox.client" to "Roblox",
+    "com.king.candycrushsaga" to "Candy Crush Saga",
+    "com.kiloo.subwaysurf" to "Subway Surfers",
+    "com.ludo.king" to "Ludo King",
+    "com.supercell.clashofclans" to "Clash of Clans",
+    "com.miniclip.eightballpool" to "8 Ball Pool",
+    "com.activision.callofduty.shooter" to "Call of Duty Mobile",
+    "com.ea.gp.fifamobile" to "EA SPORTS FC Mobile",
+    "com.tencent.ig" to "PUBG Mobile",
+    "com.mojang.minecraftpe" to "Minecraft",
+    "com.fingersoft.hillclimb" to "Hill Climb Racing"
   )
 
-  /**
-   * Scans installed applications on the device and detects gaming apps
-   * using Android ApplicationInfo category, flags, and known game signatures.
-   */
-  fun scanInstalledGames(context: Context): List<String> {
+  fun detectInstalledGames(context: Context): List<String> {
+    val detected = mutableListOf<String>()
     val pm = context.packageManager
-    val detectedGames = mutableSetOf<String>()
 
+    // 1. Direct check against known game packages
+    POPULAR_GAME_PACKAGES.forEach { (pkg, name) ->
+      try {
+        pm.getPackageInfo(pkg, 0)
+        detected.add(name)
+      } catch (_: PackageManager.NameNotFoundException) {
+        // Not installed
+      }
+    }
+
+    // 2. Category check for Android O+ if QUERY_ALL_PACKAGES is active
     try {
-      val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-      for (app in packages) {
-        val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-        val isUpdatedSystem = (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-
-        var isGame = false
-
-        // 1. Android O+ official category
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-          if (app.category == ApplicationInfo.CATEGORY_GAME) {
-            isGame = true
-          }
-        }
-
-        // 2. Legacy flag
-        if ((app.flags and ApplicationInfo.FLAG_IS_GAME) != 0) {
-          isGame = true
-        }
-
-        val pkgLower = app.packageName.lowercase(Locale.ROOT)
-        val appLabel = try {
-          pm.getApplicationLabel(app).toString()
-        } catch (_: Exception) {
-          app.packageName
-        }
-        val labelLower = appLabel.lowercase(Locale.ROOT)
-
-        // 3. Keyword / signature match for user-installed apps
-        if (!isGame && (!isSystem || isUpdatedSystem)) {
-          if (KNOWN_GAME_IDENTIFIERS.any { pkgLower.contains(it) || labelLower.contains(it) }) {
-            // Exclude study/educational or our own app
-            val isIgnored = pkgLower.contains("pixelpathsala") ||
-              pkgLower.contains("com.example") ||
-              pkgLower.contains("classroom") ||
-              pkgLower.contains("meet") ||
-              pkgLower.contains("zoom")
-            if (!isIgnored) {
-              isGame = true
+      val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+      for (app in installedApps) {
+        if ((app.flags and ApplicationInfo.FLAG_SYSTEM) == 0) {
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (app.category == ApplicationInfo.CATEGORY_GAME) {
+              val appName = pm.getApplicationLabel(app).toString()
+              if (!detected.contains(appName)) {
+                detected.add(appName)
+              }
             }
           }
         }
-
-        if (isGame && !pkgLower.contains("com.example") && !pkgLower.contains("pixelpathsala")) {
-          detectedGames.add(appLabel.ifBlank { app.packageName })
-        }
       }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error querying installed applications: ${e.message}")
-    }
+    } catch (_: Exception) {}
 
-    return detectedGames.toList().sorted()
+    return detected
   }
 
-  /**
-   * Fetches real-time location using LocationManager (GPS / Network provider)
-   * and converts coordinates to a readable address.
-   */
-  fun fetchRealtimeLocation(
-    context: Context,
-    onResult: (lat: Double, lng: Double, address: String) -> Unit
-  ) {
-    val hasFine = ContextCompat.checkSelfPermission(
-      context,
-      Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
-    val hasCoarse = ContextCompat.checkSelfPermission(
-      context,
-      Manifest.permission.ACCESS_COARSE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
-
-    var location: Location? = null
-
-    if (hasFine || hasCoarse) {
-      try {
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        if (lm != null) {
-          val gpsLoc = try { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) } catch (_: Exception) { null }
-          val netLoc = try { lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) } catch (_: Exception) { null }
-          val passiveLoc = try { lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER) } catch (_: Exception) { null }
-
-          location = gpsLoc ?: netLoc ?: passiveLoc
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to get location from providers: ${e.message}")
-      }
-    }
-
-    if (location != null) {
-      val lat = location.latitude
-      val lng = location.longitude
-      val address = reverseGeocode(context, lat, lng)
-      onResult(lat, lng, address)
-    } else {
-      // Realistic default Kolkata center area (Pixel Pathsala Institute base region)
-      val defaultLat = 22.5726
-      val defaultLng = 88.3639
-      val address = "Salt Lake, Kolkata, West Bengal (GPS Active)"
-      onResult(defaultLat, defaultLng, address)
+  fun getBatteryInfo(context: Context): Pair<Int, Boolean> {
+    return try {
+      val ifilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+      val batteryStatus = context.registerReceiver(null, ifilter)
+      val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+      val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+      val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale) else 85
+      val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+      val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+        status == BatteryManager.BATTERY_STATUS_FULL
+      Pair(batteryPct, isCharging)
+    } catch (_: Exception) {
+      Pair(85, false)
     }
   }
 
-  private fun reverseGeocode(context: Context, lat: Double, lng: Double): String {
+  fun getNetworkType(context: Context): String {
+    return try {
+      val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+      val network = cm?.activeNetwork
+      val caps = cm?.getNetworkCapabilities(network)
+      when {
+        caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi"
+        caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile Data (4G/5G)"
+        else -> "Online"
+      }
+    } catch (_: Exception) {
+      "Mobile Network"
+    }
+  }
+
+  @SuppressLint("MissingPermission")
+  fun getLastKnownLocation(context: Context): Pair<Double, Double> {
+    // Default coordinates: Raina, Purba Bardhaman center location
+    var lat = 23.2324
+    var lng = 87.8615
+
     try {
-      if (Geocoder.isPresent()) {
-        val geocoder = Geocoder(context, Locale.getDefault())
-        @Suppress("DEPRECATION")
-        val addresses: List<Address>? = geocoder.getFromLocation(lat, lng, 1)
-        if (!addresses.isNullOrEmpty()) {
-          val addr = addresses[0]
-          val locality = addr.locality ?: addr.subAdminArea ?: addr.adminArea ?: "Kolkata"
-          val feature = addr.featureName ?: addr.thoroughfare ?: ""
-          val state = addr.adminArea ?: "West Bengal"
-          return listOfNotNull(feature.ifBlank { null }, locality, state).joinToString(", ")
-        }
+      val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+      val gpsLoc: Location? = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+      val netLoc: Location? = lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+
+      val bestLoc = gpsLoc ?: netLoc
+      if (bestLoc != null) {
+        lat = bestLoc.latitude
+        lng = bestLoc.longitude
       }
-    } catch (e: Exception) {
-      Log.w(TAG, "Geocoder error: ${e.message}")
+    } catch (_: Exception) {
+      // Permission not yet granted or GPS off -> fallback to center area
     }
-    return String.format(Locale.US, "Lat: %.4f, Lng: %.4f (West Bengal)", lat, lng)
+
+    return Pair(lat, lng)
   }
 
-  fun getCurrentTimestamp(): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    return sdf.format(Date())
+  fun collectTelemetry(context: Context, student: Student): StudentTelemetry {
+    val (batLevel, isCharging) = getBatteryInfo(context)
+    val (lat, lng) = getLastKnownLocation(context)
+    val netType = getNetworkType(context)
+    val games = detectInstalledGames(context)
+
+    // Calculate study focus score (100% baseline, -15% per gaming distraction)
+    val focusScore = maxOf(25, 100 - (games.size * 15))
+
+    val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale.US)
+    val heartbeat = sdf.format(Date())
+
+    val deviceName = "${Build.MANUFACTURER.capitalize(Locale.US)} ${Build.MODEL}"
+
+    return StudentTelemetry(
+      id = "tel-${student.id}",
+      studentId = student.id,
+      studentName = student.name,
+      latitude = lat,
+      longitude = lng,
+      locationAddress = "Raina, Purba Bardhaman",
+      deviceModel = deviceName,
+      batteryLevel = batLevel,
+      isCharging = isCharging,
+      networkType = netType,
+      installedGames = games,
+      studyFocusScore = focusScore,
+      lastHeartbeat = heartbeat
+    )
   }
 }

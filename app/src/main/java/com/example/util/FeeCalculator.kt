@@ -1,617 +1,280 @@
 package com.example.util
 
-import com.example.data.model.Batch
-import com.example.data.model.Course
-import com.example.data.model.Discount
-import com.example.data.model.FeePayment
-import com.example.data.model.Student
-import java.util.Calendar
-import java.util.Locale
-
-data class MonthFeeStatus(
-  val monthKey: String, // e.g. "2026-08"
-  val monthLabel: String, // e.g. "August 2026"
-  val standardFee: Double, // e.g. 400.0
-  val discount: Double, // e.g. 250.0
-  val netPayable: Double, // e.g. 150.0
-  val isPaid: Boolean,
-  val isPending: Boolean,
-  val paidAmount: Double,
-  val dueAmount: Double,
-  val matchingPayment: FeePayment? = null,
-  val discountTitle: String? = null
-) {
-  // Compatibility getter for existing UI components
-  val feeAmount: Double get() = if (discount > 0) netPayable else standardFee
-}
-
-data class StudentFeeSummary(
-  val student: Student,
-  val course: Course?,
-  val batch: Batch?,
-  val standardMonthlyFee: Double, // e.g. 400.0
-  val monthlyDiscount: Double, // e.g. 250.0
-  val effectiveMonthlyFee: Double, // e.g. 150.0
-  val admissionDate: String, // e.g. "2026-08-16"
-  val admissionMonth: String, // e.g. "August 2026"
-  val currentMonth: String = "", // e.g. "October 2026"
-  val monthsElapsed: List<MonthFeeStatus>, // All months from admission month to current month
-  val totalGrossBilled: Double, // standardMonthlyFee * monthsElapsed.size
-  val totalDiscountAllowed: Double, // total discount applied across billing
-  val totalNetBilled: Double, // totalGrossBilled - totalDiscountAllowed (Net Payable from Admission Month)
-  val totalPaid: Double, // already paid amount adjusted as website
-  val dueAmount: Double, // maxOf(0.0, totalNetBilled - totalPaid) -> Pending Amount
-  val advanceAmount: Double, // maxOf(0.0, totalPaid - totalNetBilled)
-  val paidMonthsCount: Int,
-  val dueMonthsCount: Int,
-  val unpaidMonths: List<MonthFeeStatus>,
-  val payments: List<FeePayment>,
-  val appliedDiscountTitle: String? = null
-) {
-  // Compatibility getters for existing UI
-  val monthlyFee: Double get() = effectiveMonthlyFee
-  val totalBilled: Double get() = totalNetBilled
-  val payableFromAdmissionMonth: Double get() = totalNetBilled
-  val grossBilledFromAdmissionMonth: Double get() = totalGrossBilled
-  val totalDiscount: Double get() = totalDiscountAllowed
-  val billedMonthsCount: Int get() = monthsElapsed.size
-  val pendingAmount: Double get() = dueAmount
-  val pendingMonthsText: String get() = if (dueMonthsCount > 0) "$dueMonthsCount Months Pending (From $admissionMonth to $currentMonth)" else "All Cleared Up to $currentMonth"
-}
+import com.example.data.model.*
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.math.max
 
 object FeeCalculator {
 
-  private val MONTH_NAMES = arrayOf(
-    "", "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  )
+  private val IST_TIMEZONE = TimeZone.getTimeZone("Asia/Kolkata")
 
-  data class DiscountResolution(
-    val amount: Double,
-    val discount: Discount? = null,
-    val title: String? = null
-  )
+  fun parseIsoOrMonthToYearMonth(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    val trimmed = raw.trim()
 
-  /**
-   * Determine standard monthly fee as per batch and course.
-   */
-  fun getStandardMonthlyFee(
-    student: Student,
-    courses: List<Course>,
-    batches: List<Batch>
-  ): Double {
-    val batch = batches.find { it.id == student.batchId }
-    val course = courses.find { it.id == student.courseId }
-      ?: courses.find { it.id == batch?.courseId }
-      ?: courses.firstOrNull()
-    return course?.monthlyFee?.takeIf { it > 0 } ?: 400.0
-  }
-
-  /**
-   * Resolves the best applicable discount for a student based on:
-   * 1. Student explicit discount / custom fee override
-   * 2. Database discount table matching rules:
-   *    - Active status
-   *    - Target scope (student ID, batch ID, course ID, academic class, or 'all')
-   *    - Applicable months (all_months, or selected_months matching monthKey)
-   *    - Type: percentage vs flat amount
-   */
-  fun resolveDiscount(
-    student: Student,
-    courses: List<Course>,
-    batches: List<Batch>,
-    discounts: List<Discount> = emptyList(),
-    monthKey: String? = null,
-    monthLabel: String? = null
-  ): DiscountResolution {
-    val batch = batches.find { it.id == student.batchId }
-    val course = courses.find { it.id == student.courseId }
-      ?: courses.find { it.id == batch?.courseId }
-      ?: courses.firstOrNull()
-    val standardFee = course?.monthlyFee?.takeIf { it > 0 } ?: 400.0
-
-    // 1. Explicit student-level discount from student record
-    var explicitDiscount = 0.0
-    var explicitTitle: String? = null
-
-    if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
-      explicitDiscount = student.monthlyDiscount
-      explicitTitle = student.discountReason ?: "Student Concession"
-    } else if (student.customMonthlyFeeOverride != null && student.customMonthlyFeeOverride > 0 && student.customMonthlyFeeOverride < standardFee) {
-      val override = student.customMonthlyFeeOverride
-      explicitDiscount = if (override <= standardFee / 2) override else maxOf(0.0, standardFee - override)
-      explicitTitle = student.discountReason ?: "Custom Fee Concession"
+    // 1. If already in YYYY-MM format
+    if (trimmed.matches(Regex("""^\d{4}-\d{2}$"""))) {
+      return trimmed
     }
 
-    // 2. Matching discounts from database discount table
-    var bestDbDiscount: Discount? = null
-    var bestDbAmount = 0.0
+    // 2. If in YYYY-MM-DD format
+    if (trimmed.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))) {
+      return trimmed.substring(0, 7)
+    }
 
-    for (d in discounts) {
-      if (!d.active) continue
-
-      // Scope match
-      val scopeMatches = when (d.scope.lowercase().trim()) {
-        "student" -> !d.studentId.isNullOrBlank() && d.studentId == student.id
-        "batch" -> !d.batchId.isNullOrBlank() && d.batchId == student.batchId
-        "course" -> !d.courseId.isNullOrBlank() && (d.courseId == student.courseId || d.courseId == course?.id)
-        "class" -> !d.academicClass.isNullOrBlank() && (
-          d.academicClass.equals(student.studentClass, ignoreCase = true) ||
-          d.academicClass.equals(course?.academicClass, ignoreCase = true)
-        )
-        "all" -> true
-        else -> d.scope.isBlank() || d.scope.equals("universal", ignoreCase = true)
-      }
-      if (!scopeMatches) continue
-
-      // Month match (handles all_months, single_month, selected_months, and ISO date strings)
-      val isSpecificMonths = d.applicableMonthsType.equals("selected_months", ignoreCase = true) ||
-        d.applicableMonthsType.equals("single_month", ignoreCase = true) ||
-        d.applicableMonthsType.equals("specific_months", ignoreCase = true)
-
-      val monthMatches = if (isSpecificMonths) {
-        if (d.selectedMonths.isNullOrEmpty()) {
-          true
-        } else {
-          d.selectedMonths.any { sm -> matchesSelectedMonth(monthKey, monthLabel, sm) }
+    // 3. If in ISO 8601 UTC timestamp format e.g. "2026-06-30T18:30:00.000Z"
+    if (trimmed.contains("T")) {
+      try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+          timeZone = TimeZone.getTimeZone("UTC")
         }
+        val clean = trimmed.split(".")[0].replace("Z", "")
+        val date = sdf.parse(clean)
+        if (date != null) {
+          val outSdf = SimpleDateFormat("yyyy-MM", Locale.US).apply {
+            timeZone = IST_TIMEZONE
+          }
+          return outSdf.format(date)
+        }
+      } catch (_: Exception) {}
+    }
+
+    // 4. Try DD/MM/YYYY or DD-MM-YYYY
+    try {
+      val slashParts = trimmed.split("/", "-")
+      if (slashParts.size == 3) {
+        val y = if (slashParts[0].length == 4) slashParts[0] else slashParts[2]
+        val m = if (slashParts[0].length == 4) slashParts[1] else slashParts[1]
+        val paddedM = m.padStart(2, '0')
+        return "$y-$paddedM"
+      }
+    } catch (_: Exception) {}
+
+    return null
+  }
+
+  fun formatYearMonthToDisplay(yearMonth: String): String {
+    return try {
+      val sdfIn = SimpleDateFormat("yyyy-MM", Locale.US)
+      val date = sdfIn.parse(yearMonth) ?: return yearMonth
+      val sdfOut = SimpleDateFormat("MMMM yyyy", Locale.US)
+      sdfOut.format(date)
+    } catch (_: Exception) {
+      yearMonth
+    }
+  }
+
+  fun getMonthListBetween(startYearMonth: String, endYearMonth: String): List<String> {
+    val result = mutableListOf<String>()
+    try {
+      val sdf = SimpleDateFormat("yyyy-MM", Locale.US)
+      val cal = Calendar.getInstance().apply {
+        time = sdf.parse(startYearMonth) ?: Date()
+      }
+      val endCal = Calendar.getInstance().apply {
+        time = sdf.parse(endYearMonth) ?: Date()
+      }
+
+      while (!cal.after(endCal)) {
+        result.add(sdf.format(cal.time))
+        cal.add(Calendar.MONTH, 1)
+      }
+    } catch (_: Exception) {
+      if (startYearMonth.isNotBlank()) result.add(startYearMonth)
+    }
+    return result
+  }
+
+  fun getCurrentYearMonth(): String {
+    val sdf = SimpleDateFormat("yyyy-MM", Locale.US).apply {
+      timeZone = IST_TIMEZONE
+    }
+    return sdf.format(Date())
+  }
+
+  fun resolveApplicableDiscount(
+    student: Student,
+    course: Course?,
+    batch: Batch?,
+    targetYearMonth: String,
+    allDiscounts: List<Discount>,
+    baseMonthlyFee: Double
+  ): DiscountResolution? {
+    // If student has explicit monthlyDiscount set on student record
+    if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
+      return DiscountResolution(
+        discountId = "student-direct",
+        discountTitle = student.discountReason ?: "Student Concession",
+        discountType = "flat",
+        value = student.monthlyDiscount,
+        calculatedDeduction = minOf(student.monthlyDiscount, baseMonthlyFee)
+      )
+    }
+
+    val activeDiscounts = allDiscounts.filter { it.active }
+
+    // Find all matching discount rules
+    val matching = activeDiscounts.filter { disc ->
+      // Scope match
+      val scopeMatches = when (disc.scope.lowercase()) {
+        "student" -> disc.studentId.isNullOrBlank() || disc.studentId == student.id
+        "batch" -> disc.batchId.isNullOrBlank() || disc.batchId == student.batchId
+        "course" -> disc.courseId.isNullOrBlank() || disc.courseId == student.courseId
+        "class" -> {
+          val stClass = student.studentClass ?: course?.academicClass ?: ""
+          disc.academicClass.isNullOrBlank() || disc.academicClass.equals(stClass, ignoreCase = true)
+        }
+        "all" -> true
+        else -> false
+      }
+      if (!scopeMatches) return@filter false
+
+      // Months match
+      when (disc.applicableMonthsType.lowercase()) {
+        "all_months" -> true
+        "selected_months", "single_month" -> {
+          val sel = disc.selectedMonths ?: emptyList()
+          sel.any { rawM ->
+            val norm = parseIsoOrMonthToYearMonth(rawM)
+            norm == targetYearMonth
+          }
+        }
+        else -> true
+      }
+    }
+
+    if (matching.isEmpty()) return null
+
+    // Pick highest discount deduction
+    val candidate = matching.maxByOrNull { disc ->
+      if (disc.type.equals("percentage", ignoreCase = true)) {
+        (baseMonthlyFee * disc.value) / 100.0
       } else {
-        true // "all_months"
+        disc.value
       }
-      if (!monthMatches) continue
+    } ?: return null
 
-      // Calculate discount amount
-      val discValue = when (d.type.lowercase().trim()) {
-        "percentage" -> (standardFee * d.value) / 100.0
-        else -> d.value // "flat"
-      }
-
-      if (discValue > bestDbAmount) {
-        bestDbAmount = discValue
-        bestDbDiscount = d
-      }
-    }
-
-    return if (bestDbAmount >= explicitDiscount && bestDbDiscount != null) {
-      DiscountResolution(
-        amount = minOf(standardFee, bestDbAmount),
-        discount = bestDbDiscount,
-        title = bestDbDiscount.title
-      )
+    val deduction = if (candidate.type.equals("percentage", ignoreCase = true)) {
+      (baseMonthlyFee * candidate.value) / 100.0
     } else {
-      DiscountResolution(
-        amount = minOf(standardFee, explicitDiscount),
-        discount = null,
-        title = explicitTitle
-      )
-    }
-  }
-
-  /**
-   * Matches a target billing month (e.g. "2026-10" or "October 2026")
-   * against a selected month string (which may be ISO timestamp, "2026-10", or "October 2026").
-   */
-  fun matchesSelectedMonth(targetMonthKey: String?, targetMonthLabel: String?, selectedMonthStr: String): Boolean {
-    if (targetMonthKey == null && targetMonthLabel == null) return true
-    val clean = selectedMonthStr.trim().replace("\"", "").replace("'", "")
-    if (clean.isBlank()) return true
-
-    if (targetMonthKey != null && (clean.contains(targetMonthKey, ignoreCase = true) || targetMonthKey.contains(clean, ignoreCase = true))) {
-      return true
-    }
-    if (targetMonthLabel != null && (clean.contains(targetMonthLabel, ignoreCase = true) || targetMonthLabel.contains(clean, ignoreCase = true))) {
-      return true
+      candidate.value
     }
 
-    val localDate = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(clean)
-    if (localDate.isNotBlank()) {
-      val (y, m) = parseAdmissionYearMonth(localDate)
-      val convertedKey = String.format(Locale.ROOT, "%04d-%02d", y, m)
-      val convertedLabel = "${MONTH_NAMES[m]} $y"
-      if (targetMonthKey != null && targetMonthKey == convertedKey) return true
-      if (targetMonthLabel != null && targetMonthLabel.equals(convertedLabel, ignoreCase = true)) return true
-    }
-
-    val (y, m) = parseAdmissionYearMonth(clean)
-    val convertedKey = String.format(Locale.ROOT, "%04d-%02d", y, m)
-    val convertedLabel = "${MONTH_NAMES[m]} $y"
-    if (targetMonthKey != null && targetMonthKey == convertedKey) return true
-    if (targetMonthLabel != null && targetMonthLabel.equals(convertedLabel, ignoreCase = true)) return true
-
-    return false
-  }
-
-  /**
-   * Determine monthly discount for student (override vs standard, explicit monthly discount, or database discount table).
-   */
-  fun getMonthlyDiscount(
-    student: Student,
-    courses: List<Course>,
-    batches: List<Batch>,
-    discounts: List<Discount> = emptyList()
-  ): Double {
-    return resolveDiscount(student, courses, batches, discounts).amount
-  }
-
-  /**
-   * Effective monthly fee payable for a student after discount.
-   */
-  fun getMonthlyFee(
-    student: Student,
-    courses: List<Course>,
-    batches: List<Batch>,
-    discounts: List<Discount> = emptyList()
-  ): Double {
-    val standard = getStandardMonthlyFee(student, courses, batches)
-    val discount = getMonthlyDiscount(student, courses, batches, discounts)
-    return maxOf(0.0, standard - discount)
-  }
-
-  /**
-   * Parses year and month from any admission date / month string:
-   * e.g. "2026-10-27T18:30:00.000Z", "2026-08-16", "2026-08", "August 2026", "28/10/2026"
-   */
-  fun parseAdmissionYearMonth(dateStr: String?): Pair<Int, Int> {
-    if (dateStr.isNullOrBlank()) {
-      val now = Calendar.getInstance()
-      return Pair(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1)
-    }
-    val clean = dateStr.trim().replace("\"", "").replace("'", "")
-
-    // Check for named month strings like "August 2026" or "October 2026"
-    for (i in 1..12) {
-      val name = MONTH_NAMES[i]
-      if (clean.contains(name, ignoreCase = true) || clean.contains(name.take(3), ignoreCase = true)) {
-        val yMatch = Regex("""\b(20\d\d)\b""").find(clean)
-        val y = yMatch?.value?.toIntOrNull() ?: 2026
-        return Pair(y, i)
-      }
-    }
-
-    // Normalize ISO UTC timestamps to IST date first to prevent 1-day/1-month back shifts
-    val normalizedIso = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(clean)
-    val toParse = if (normalizedIso.isNotBlank()) normalizedIso else clean
-
-    // Check ISO or yyyy-MM-dd / yyyy-MM format (e.g. 2026-10-10 or 2026-08-16)
-    if (toParse.matches(Regex("""^\d{4}[-/]\d{1,2}.*"""))) {
-      val parts = toParse.split("-", "/", "T", " ")
-      val y = parts[0].toIntOrNull() ?: 2026
-      val m = parts[1].toIntOrNull() ?: (Calendar.getInstance().get(Calendar.MONTH) + 1)
-      return Pair(y, m.coerceIn(1, 12))
-    }
-
-    // Check dd-MM-yyyy or dd/MM/yyyy format (e.g. 16-08-2026 or 01/03/2026)
-    if (clean.matches(Regex("""^\d{1,2}[-/]\d{1,2}[-/]\d{4}.*"""))) {
-      val parts = clean.split("-", "/", " ")
-      val p0 = parts[0].toIntOrNull() ?: 1
-      val p1 = parts[1].toIntOrNull() ?: 1
-      val y = parts[2].substring(0, 4).toIntOrNull() ?: 2026
-      val m = if (p0 > 12) p1 else if (p1 > 12) p0 else p1 // standard dd-MM-yyyy
-      return Pair(y, m.coerceIn(1, 12))
-    }
-
-    val now = Calendar.getInstance()
-    return Pair(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1)
-  }
-
-  /**
-   * Returns ordered list of months from admission month up to current month (inclusive).
-   */
-  fun getMonthsSinceAdmission(admissionDate: String?): List<Pair<String, String>> {
-    val (admYear, admMonth) = parseAdmissionYearMonth(admissionDate)
-
-    val cal = Calendar.getInstance()
-    val currentYear = cal.get(Calendar.YEAR)
-    val currentMonth = cal.get(Calendar.MONTH) + 1 // 1..12
-
-    val list = mutableListOf<Pair<String, String>>()
-    var y = admYear
-    var m = admMonth
-
-    while (y < currentYear || (y == currentYear && m <= currentMonth)) {
-      val key = String.format(Locale.ROOT, "%04d-%02d", y, m)
-      val label = "${MONTH_NAMES[m]} $y"
-      list.add(Pair(key, label))
-      m++
-      if (m > 12) {
-        m = 1
-        y++
-      }
-    }
-
-    if (list.isEmpty()) {
-      val safeMonth = admMonth.coerceIn(1, 12)
-      val key = String.format(Locale.ROOT, "%04d-%02d", admYear, safeMonth)
-      val label = "${MONTH_NAMES[safeMonth]} $admYear"
-      list.add(Pair(key, label))
-    }
-
-    return list
-  }
-
-  /**
-   * Calculates comprehensive fee summary for a student:
-   * - Standard payable amount as per batch and course
-   * - Discounts calculated using database discount table & student concession rules
-   * - Net payable amount calculated from date of admission to current date month
-   * - Pending amount and unpaid months calculated chronologically
-   */
-  fun calculateStudentFeeSummary(
-    student: Student,
-    courses: List<Course>,
-    batches: List<Batch>,
-    allPayments: List<FeePayment>,
-    admissions: List<com.example.data.model.AdmissionApplication> = emptyList(),
-    discounts: List<Discount> = emptyList()
-  ): StudentFeeSummary {
-    val batch = batches.find { it.id == student.batchId }
-    val course = courses.find { it.id == student.courseId }
-      ?: courses.find { it.id == batch?.courseId }
-      ?: courses.firstOrNull()
-
-    val standardMonthlyFee = getStandardMonthlyFee(student, courses, batches)
-    val defaultDiscountRes = resolveDiscount(student, courses, batches, discounts)
-    val monthlyDiscount = defaultDiscountRes.amount
-    val effectiveMonthlyFee = maxOf(0.0, standardMonthlyFee - monthlyDiscount)
-
-    // Check if admissions table has matching application for this student
-    val matchingApp = admissions.find { app ->
-      (app.studentName.isNotBlank() && app.studentName.equals(student.name, ignoreCase = true)) ||
-      (app.mobile.isNotBlank() && app.mobile == student.mobile) ||
-      (app.aadhaarNo.isNotBlank() && app.aadhaarNo == student.aadhaarNo)
-    }
-
-    // Strictly calculate pending amount depending on student's actual admission date in the database
-    val rawStudentDate = student.admissionDate.ifBlank { student.admissionMonth.ifBlank { "" } }
-    val studentDate = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(rawStudentDate)
-    val appDate = com.example.data.sheet.GoogleSheetSyncService.parseIsoDateToLocalDate(matchingApp?.appliedDate)
-    val effectiveAdmissionStr = studentDate.ifBlank { appDate.ifBlank { "2026-08-01" } }
-
-    val (admYear, admMonth) = parseAdmissionYearMonth(effectiveAdmissionStr)
-    val admissionMonthLabel = "${MONTH_NAMES[admMonth]} $admYear"
-
-    // Filter student payments (both counter receipts and online app payments)
-    val studentPayments = allPayments.filter { p ->
-      p.studentId == student.id || (p.studentName.isNotBlank() && p.studentName.equals(student.name, ignoreCase = true))
-    }
-    val baseApprovedPayments = studentPayments.filter { it.status.equals("approved", ignoreCase = true) }
-    val pendingPayments = studentPayments.filter { it.status.equals("pending", ignoreCase = true) }
-
-    // Synthesize admission payment if application was marked as paid_advance and no payments exist in payments table
-    val approvedPayments = if (baseApprovedPayments.isEmpty() && matchingApp != null && matchingApp.initialPaymentStatus.contains("paid", ignoreCase = true)) {
-      val admAmount = matchingApp.initialPaymentAmount ?: effectiveMonthlyFee
-      listOf(
-        FeePayment(
-          id = "pay-adm-${matchingApp.id}",
-          receiptNo = "REC/${admYear}/ADM-${student.rollNo.takeLast(4).ifBlank { "001" }}",
-          studentId = student.id,
-          studentName = student.name,
-          studentAadhaar = student.aadhaarNo,
-          studentMobile = student.mobile,
-          courseTitle = course?.title ?: "Academic Course",
-          batchName = batch?.name ?: "Active Batch",
-          month = admissionMonthLabel,
-          monthsCovered = listOf(String.format(Locale.ROOT, "%04d-%02d", admYear, admMonth)),
-          baseMonthlyFee = standardMonthlyFee,
-          totalBaseFee = standardMonthlyFee,
-          totalDiscount = monthlyDiscount,
-          finalAmountPaid = admAmount,
-          paymentMode = matchingApp.initialPaymentMode ?: "UPI",
-          transactionRef = matchingApp.initialPaymentRef ?: "UPI-ADM-ADVANCE",
-          status = "approved",
-          paymentDate = effectiveAdmissionStr,
-          approvedBy = "Admin (Admission Advance)",
-          remarks = "Initial fee paid at admission"
-        )
-      )
-    } else {
-      baseApprovedPayments
-    }
-
-    val paymentsSum = approvedPayments.sumOf { it.finalAmountPaid }
-    val sheetPaid = student.totalPaidInSheet ?: 0.0
-    val totalPaid = maxOf(paymentsSum, sheetPaid)
-
-    val rawMonths = getMonthsSinceAdmission(effectiveAdmissionStr)
-    val currentMonthLabel = rawMonths.lastOrNull()?.second ?: run {
-      val cal = Calendar.getInstance()
-      "${MONTH_NAMES[cal.get(Calendar.MONTH) + 1]} ${cal.get(Calendar.YEAR)}"
-    }
-
-    // Adjust paid amount across months chronologically (as website does)
-    var remainingCredit = totalPaid
-    val monthStatuses = mutableListOf<MonthFeeStatus>()
-
-    for ((monthKey, monthLabel) in rawMonths) {
-      val explicitPayment = approvedPayments.find { p ->
-        p.monthsCovered.any { it.equals(monthKey, ignoreCase = true) || it.contains(monthLabel, ignoreCase = true) } ||
-        p.month.equals(monthKey, ignoreCase = true) || p.month.contains(monthLabel, ignoreCase = true)
-      } ?: approvedPayments.firstOrNull()
-
-      val pendingPayment = pendingPayments.find { p ->
-        p.monthsCovered.any { it.equals(monthKey, ignoreCase = true) || it.contains(monthLabel, ignoreCase = true) } ||
-        p.month.equals(monthKey, ignoreCase = true) || p.month.contains(monthLabel, ignoreCase = true)
-      }
-
-      val monthDiscRes = resolveDiscount(student, courses, batches, discounts, monthKey, monthLabel)
-      val monthStandardFee = standardMonthlyFee
-      val monthDiscount = monthDiscRes.amount
-      val monthNetPayable = maxOf(0.0, monthStandardFee - monthDiscount)
-
-      val isCoveredByCredit = remainingCredit >= monthNetPayable
-      val isPartiallyCovered = remainingCredit > 0 && remainingCredit < monthNetPayable
-      val coveredAmount = when {
-        isCoveredByCredit -> monthNetPayable
-        isPartiallyCovered -> remainingCredit
-        else -> 0.0
-      }
-      val monthDue = maxOf(0.0, monthNetPayable - coveredAmount)
-      remainingCredit = maxOf(0.0, remainingCredit - monthNetPayable)
-
-      monthStatuses.add(
-        MonthFeeStatus(
-          monthKey = monthKey,
-          monthLabel = monthLabel,
-          standardFee = monthStandardFee,
-          discount = monthDiscount,
-          netPayable = monthNetPayable,
-          isPaid = isCoveredByCredit || coveredAmount >= monthNetPayable,
-          isPending = pendingPayment != null,
-          paidAmount = coveredAmount,
-          dueAmount = monthDue,
-          matchingPayment = if (isCoveredByCredit || coveredAmount > 0) explicitPayment else null,
-          discountTitle = monthDiscRes.title
-        )
-      )
-    }
-
-    val totalGrossBilled = monthStatuses.sumOf { it.standardFee }
-    val baseDiscountAllowed = monthStatuses.sumOf { it.discount }
-    val receiptExtraDiscounts = approvedPayments.sumOf { p ->
-      val coveredCount = maxOf(1, p.monthsCovered.size)
-      maxOf(0.0, p.totalDiscount - (coveredCount * monthlyDiscount))
-    }
-    val totalDiscountAllowed = baseDiscountAllowed + receiptExtraDiscounts
-    val totalNetBilled = maxOf(0.0, totalGrossBilled - totalDiscountAllowed)
-
-    val dueAmount = maxOf(0.0, totalNetBilled - totalPaid)
-    val advanceAmount = maxOf(0.0, totalPaid - totalNetBilled)
-
-    val paidCount = monthStatuses.count { it.isPaid }
-    val unpaidList = monthStatuses.filter { !it.isPaid }
-
-    return StudentFeeSummary(
-      student = student,
-      course = course,
-      batch = batch,
-      standardMonthlyFee = standardMonthlyFee,
-      monthlyDiscount = monthlyDiscount,
-      effectiveMonthlyFee = effectiveMonthlyFee,
-      admissionDate = effectiveAdmissionStr,
-      admissionMonth = admissionMonthLabel,
-      currentMonth = currentMonthLabel,
-      monthsElapsed = monthStatuses,
-      totalGrossBilled = totalGrossBilled,
-      totalDiscountAllowed = totalDiscountAllowed,
-      totalNetBilled = totalNetBilled,
-      totalPaid = totalPaid,
-      dueAmount = dueAmount,
-      advanceAmount = advanceAmount,
-      paidMonthsCount = paidCount,
-      dueMonthsCount = unpaidList.size,
-      unpaidMonths = unpaidList,
-      payments = studentPayments,
-      appliedDiscountTitle = defaultDiscountRes.title
+    return DiscountResolution(
+      discountId = candidate.id,
+      discountTitle = candidate.title,
+      discountType = candidate.type,
+      value = candidate.value,
+      calculatedDeduction = minOf(deduction, baseMonthlyFee)
     )
   }
 
-  /**
-   * Helper to normalize academic class strings (e.g. "Class 12", "Class 12 (Science)", "Class 10 (Secondary)")
-   * and determine whether a target class (from live class, material, exam) matches the student's admitted class.
-   */
-  fun matchesAcademicClass(studentClass: String?, targetClass: String?): Boolean {
-    val target = targetClass?.trim() ?: ""
-    if (target.isBlank() || target.equals("all", ignoreCase = true) ||
-      target.equals("all classes", ignoreCase = true) ||
-      target.equals("general", ignoreCase = true)
-    ) {
-      return true
-    }
-    val student = studentClass?.trim() ?: ""
-    if (student.isBlank()) return true
-
-    fun norm(s: String) = s.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
-    val sNorm = norm(student)
-    val tNorm = norm(target)
-
-    if (sNorm == tNorm || sNorm.contains(tNorm) || tNorm.contains(sNorm)) {
-      return true
-    }
-
-    val sDigits = Regex("\\d+").findAll(sNorm).map { it.value }.toList()
-    val tDigits = Regex("\\d+").findAll(tNorm).map { it.value }.toList()
-    if (sDigits.isNotEmpty() && tDigits.isNotEmpty() && sDigits == tDigits) {
-      return true
-    }
-
-    return false
-  }
-
-  /**
-   * Resolves the student's effective academic class by looking at the student's explicit class,
-   * falling back to their admitted course's academicClass or title.
-   */
-  fun resolveEffectiveClass(student: Student, courses: List<Course>): String {
-    val matchingCourse = courses.find { it.id == student.courseId }
-    val explicit = student.studentClass?.trim()
-    if (!explicit.isNullOrBlank() && !explicit.startsWith("Class 10 (Secondary)")) {
-      return explicit
-    }
-    return matchingCourse?.academicClass?.takeIf { it.isNotBlank() }
-      ?: explicit?.takeIf { it.isNotBlank() }
-      ?: matchingCourse?.title?.takeIf { it.isNotBlank() }
-      ?: "Class 12"
-  }
-
-  /**
-   * Universal filter to determine if an academic item (live class, recording, study material, online exam)
-   * should be visible to a student based on their admitted class, course, and batch.
-   */
-  fun isItemForStudent(
+  fun calculateStudentDuesSummary(
     student: Student,
-    admittedClass: String?,
-    itemAcademicClass: String?,
-    itemCourseId: String?,
-    itemBatchId: String?,
-    itemSubjectOrTitle: String? = null
-  ): Boolean {
-    // 1. Direct course ID match or batch ID match
-    if (!itemCourseId.isNullOrBlank() && !itemCourseId.equals("all", ignoreCase = true) && itemCourseId == student.courseId) {
-      return true
-    }
-    if (!itemBatchId.isNullOrBlank() && !itemBatchId.equals("all", ignoreCase = true) && itemBatchId == student.batchId) {
-      return true
-    }
+    course: Course?,
+    batch: Batch?,
+    discounts: List<Discount>,
+    payments: List<FeePayment>,
+    targetUpToMonth: String = getCurrentYearMonth()
+  ): FeeDuesSummary {
+    val admMonth = parseIsoOrMonthToYearMonth(student.admissionMonth.ifBlank { student.admissionDate })
+      ?: "2026-07"
 
-    // 2. Class specification match
-    val hasExplicitClass = !itemAcademicClass.isNullOrBlank() &&
-      !itemAcademicClass.equals("all", ignoreCase = true) &&
-      !itemAcademicClass.equals("all classes", ignoreCase = true) &&
-      !itemAcademicClass.equals("general", ignoreCase = true)
+    val baseMonthlyFee = student.customMonthlyFeeOverride
+      ?: course?.monthlyFee
+      ?: 400.0
 
-    if (hasExplicitClass) {
-      return matchesAcademicClass(admittedClass, itemAcademicClass)
+    // Ensure months range is from admission month to targetUpToMonth (at least admission month)
+    val startMonth = if (admMonth > targetUpToMonth) targetUpToMonth else admMonth
+    val months = getMonthListBetween(startMonth, maxOf(admMonth, targetUpToMonth))
+
+    // Approved payments for this student
+    val approvedPayments = payments.filter {
+      it.studentId == student.id && it.status.equals("approved", ignoreCase = true)
     }
 
-    // 3. Subject or title class match (e.g. "Class 12 Physics", "Class 11 Python")
-    if (!itemSubjectOrTitle.isNullOrBlank()) {
-      val titleLower = itemSubjectOrTitle.lowercase(Locale.ROOT)
-      val sNorm = admittedClass?.lowercase(Locale.ROOT) ?: ""
-      val sDigits = Regex("\\d+").findAll(sNorm).map { it.value }.toList()
-      val titleDigits = Regex("(?:class|grade|std)\\s*(\\d+)", RegexOption.IGNORE_CASE)
-        .findAll(titleLower)
-        .map { it.groupValues[1] }
-        .toList()
-
-      if (sDigits.isNotEmpty() && titleDigits.isNotEmpty()) {
-        return sDigits.any { it in titleDigits }
+    // Map which months have been paid
+    val paidMonthsSet = mutableSetOf<String>()
+    approvedPayments.forEach { p ->
+      // If monthsCovered is populated
+      if (p.monthsCovered.isNotEmpty()) {
+        p.monthsCovered.forEach { m ->
+          parseIsoOrMonthToYearMonth(m)?.let { paidMonthsSet.add(it) }
+        }
+      }
+      // Or month field has comma-separated months
+      if (p.month.isNotBlank()) {
+        p.month.split(",").forEach { m ->
+          parseIsoOrMonthToYearMonth(m)?.let { paidMonthsSet.add(it) }
+        }
       }
     }
 
-    // 4. If course/batch is marked for "all" or blank, and no conflicting class is specified
-    val isGeneralScope = (itemCourseId.isNullOrBlank() || itemCourseId.equals("all", ignoreCase = true)) &&
-      (itemBatchId.isNullOrBlank() || itemBatchId.equals("all", ignoreCase = true))
+    val monthDetails = months.map { ym ->
+      val discountRes = resolveApplicableDiscount(
+        student = student,
+        course = course,
+        batch = batch,
+        targetYearMonth = ym,
+        allDiscounts = discounts,
+        baseMonthlyFee = baseMonthlyFee
+      )
 
-    if (isGeneralScope) {
-      return true
+      val discAmt = discountRes?.calculatedDeduction ?: 0.0
+      val net = max(0.0, baseMonthlyFee - discAmt)
+      val isPaid = paidMonthsSet.contains(ym)
+      val paidAmt = if (isPaid) net else 0.0
+      val due = if (isPaid) 0.0 else net
+
+      MonthFeeDetail(
+        yearMonth = ym,
+        monthLabel = formatYearMonthToDisplay(ym),
+        baseFee = baseMonthlyFee,
+        discountAmount = discAmt,
+        discountName = discountRes?.discountTitle,
+        netPayable = net,
+        amountPaid = paidAmt,
+        remainingDue = due,
+        isPaid = isPaid
+      )
     }
 
-    // 5. Legacy course mappings (course-1 -> Class 11, course-2 -> Class 12, course-3 -> Class 10)
-    val normClass = admittedClass?.lowercase(Locale.ROOT) ?: ""
-    if (normClass.contains("11") && (itemCourseId == "course-1" || itemBatchId == "batch-1")) return true
-    if (normClass.contains("12") && (itemCourseId == "course-2" || itemBatchId == "batch-2")) return true
-    if (normClass.contains("10") && (itemCourseId == "course-3" || itemBatchId == "batch-3")) return true
+    val pending = monthDetails.filter { !it.isPaid }
+    val paid = monthDetails.filter { it.isPaid }
 
-    return false
+    val totalBase = monthDetails.sumOf { it.baseFee }
+    val totalDisc = monthDetails.sumOf { it.discountAmount }
+    val totalNet = monthDetails.sumOf { it.netPayable }
+    val totalPaidAmt = monthDetails.sumOf { it.amountPaid }
+    val totalDue = pending.sumOf { it.netPayable }
+
+    return FeeDuesSummary(
+      studentId = student.id,
+      studentName = student.name,
+      courseTitle = course?.title ?: "Standard Course",
+      batchName = batch?.name ?: "Main Batch",
+      admissionMonth = admMonth,
+      standardMonthlyFee = baseMonthlyFee,
+      totalBaseFee = totalBase,
+      totalDiscount = totalDisc,
+      totalNetPayable = totalNet,
+      totalPaid = totalPaidAmt,
+      totalOutstandingDue = totalDue,
+      pendingMonths = pending,
+      paidMonths = paid,
+      allMonths = monthDetails
+    )
+  }
+
+  fun generateReceiptNo(existingPayments: List<FeePayment>): String {
+    val cal = Calendar.getInstance().apply { timeZone = IST_TIMEZONE }
+    val year = cal.get(Calendar.YEAR)
+    val month = (cal.get(Calendar.MONTH) + 1).toString().padStart(2, '0')
+    val prefix = "REC/$year/$month-"
+
+    val currentMonthPayments = existingPayments.filter { it.receiptNo.startsWith(prefix) }
+    val nextSeq = currentMonthPayments.size + 1
+    return "$prefix${nextSeq.toString().padStart(3, '0')}"
   }
 }

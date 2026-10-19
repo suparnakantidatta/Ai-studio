@@ -6,114 +6,62 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.admin.AdminMainScreen
-import com.example.ui.admin.AdminSettingsDialog
 import com.example.ui.auth.LoginScreen
+import com.example.ui.splash.OpeningLogoScreen
 import com.example.ui.student.StudentMainScreen
 import com.example.ui.theme.PixelPathsalaTheme
-
-sealed class AppScreen {
-  data object Login : AppScreen()
-  data object StudentPortal : AppScreen()
-  data object AdminErp : AppScreen()
-}
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
-
-    val repository = PathsalaRepository(applicationContext)
+    val repository = PathsalaRepository.getInstance(applicationContext)
 
     setContent {
       PixelPathsalaTheme {
-        val currentStudent by repository.currentStudent.collectAsState()
-        val currentAdmin by repository.currentAdmin.collectAsState()
-
-        var currentScreen by remember {
-          mutableStateOf<AppScreen>(
-            when {
-              currentStudent != null -> AppScreen.StudentPortal
-              currentAdmin != null -> AppScreen.AdminErp
-              else -> AppScreen.Login
-            }
-          )
-        }
-        var showServerConfigDialog by remember { mutableStateOf(false) }
-
-        // Sync screen with session state
-        LaunchedEffect(currentStudent, currentAdmin) {
-          if (currentStudent != null && currentScreen == AppScreen.Login) {
-            currentScreen = AppScreen.StudentPortal
-          } else if (currentAdmin != null && currentScreen == AppScreen.Login) {
-            currentScreen = AppScreen.AdminErp
-          } else if (currentStudent == null && currentAdmin == null && currentScreen != AppScreen.Login) {
-            currentScreen = AppScreen.Login
-          }
-        }
-
         Surface(
-          modifier = Modifier
-            .fillMaxSize()
-            .imePadding()
+          modifier = Modifier.fillMaxSize(),
+          color = MaterialTheme.colorScheme.background
         ) {
-          when (currentScreen) {
-            AppScreen.Login -> {
-              LoginScreen(
-                repository = repository,
-                onStudentLoginSuccess = {
-                  currentScreen = AppScreen.StudentPortal
-                },
-                onAdminLoginSuccess = {
-                  currentScreen = AppScreen.AdminErp
-                }
-              )
-            }
+          var showSplash by remember { mutableStateOf(true) }
+          val currentStudent by repository.currentStudent.collectAsState()
+          val currentAdmin by repository.currentAdmin.collectAsState()
 
-            AppScreen.StudentPortal -> {
-              BackHandler {
-                moveTaskToBack(true)
-              }
-              val student = currentStudent
-              if (student != null) {
-                StudentMainScreen(
-                  student = student,
-                  repository = repository,
-                  onLogout = {
-                    repository.logoutStudent()
-                    currentScreen = AppScreen.Login
-                  }
-                )
-              } else {
-                currentScreen = AppScreen.Login
-              }
+          if (showSplash) {
+            OpeningLogoScreen(
+              onSplashFinished = { showSplash = false }
+            )
+          } else if (currentStudent != null) {
+            BackHandler {
+              repository.logoutStudent()
             }
-
-            AppScreen.AdminErp -> {
-              BackHandler {
-                moveTaskToBack(true)
-              }
-              AdminMainScreen(
-                repository = repository,
-                onLogout = {
-                  repository.logoutAdmin()
-                  currentScreen = AppScreen.Login
-                }
-              )
+            StudentMainScreen(
+              student = currentStudent!!,
+              repository = repository,
+              onLogout = { repository.logoutStudent() }
+            )
+          } else if (currentAdmin != null) {
+            BackHandler {
+              repository.logoutAdmin()
             }
+            AdminMainScreen(
+              admin = currentAdmin!!,
+              repository = repository,
+              onLogout = { repository.logoutAdmin() }
+            )
+          } else {
+            LoginScreen(
+              repository = repository,
+              onStudentLoginSuccess = { /* StateFlow updates */ },
+              onAdminLoginSuccess = { /* StateFlow updates */ }
+            )
           }
-        }
-
-        if (showServerConfigDialog) {
-          AdminSettingsDialog(
-            repository = repository,
-            onDismiss = { showServerConfigDialog = false }
-          )
         }
       }
     }

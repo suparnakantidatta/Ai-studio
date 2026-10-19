@@ -1,235 +1,323 @@
 package com.example.data.sheet
 
-import android.util.Log
+import com.example.data.local.LocalDataStore
 import com.example.data.model.*
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import com.example.util.FeeCalculator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.StringReader
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-object GoogleSheetSyncService {
-  private const val TAG = "GoogleSheetSyncService"
+class GoogleSheetSyncService {
 
-  const val SPREADSHEET_ID = "1HVB5lNLyCIh6Uw0KmSAvaUnlQjfJMroHzAKy1a-4_O4"
-  const val WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz_CEP9stVACI0-6oOiRbJvvfAjn9X1xIVW-m26B2E9Dp4e_aNiyAavFe1jZFAS1jls/exec"
-
-  // GIDs for direct CSV fallback
-  val GIDS = mapOf(
-    "Center_Overview" to "25117137",
-    "Admin_Credentials" to "371655954",
-    "Students" to "1572610885",
-    "Courses_Batches" to "563739523",
-    "Fee_Transactions" to "154871224",
-    "Admissions" to "120081180",
-    "Discounts" to "1447428203",
-    "Educators" to "1520472103",
-    "Live_Classes" to "1629684060",
-    "Class_Recordings" to "863738719",
-    "Study_Materials" to "161082531",
-    "Exams" to "1954552249",
-    "Question_Bank" to "1111711455",
-    "Exam_Submissions" to "1708781557"
-  )
+  companion object {
+    const val WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz_CEP9stVACI0-6oOiRbJvvfAjn9X1xIVW-m26B2E9Dp4e_aNiyAavFe1jZFAS1jls/exec"
+  }
 
   private val client = OkHttpClient.Builder()
-    .connectTimeout(30, TimeUnit.SECONDS)
-    .readTimeout(45, TimeUnit.SECONDS)
-    .writeTimeout(45, TimeUnit.SECONDS)
+    .connectTimeout(25, TimeUnit.SECONDS)
+    .readTimeout(25, TimeUnit.SECONDS)
+    .writeTimeout(25, TimeUnit.SECONDS)
     .followRedirects(true)
     .followSslRedirects(true)
     .build()
 
-  /**
-   * Converts UTC ISO 8601 timestamps (e.g. "2026-10-09T18:30:00.000Z", "2026-02-28T18:30:00.000Z")
-   * serialized by Google Apps Script back to the correct local Indian Standard Time date ("2026-10-10", "2026-03-01"),
-   * preventing dates from showing one day before the date saved in the database.
-   */
-  fun parseIsoDateToLocalDate(rawDateStr: String?): String {
-    if (rawDateStr.isNullOrBlank()) return ""
-    val clean = rawDateStr.trim().replace("\"", "").replace("'", "")
-    if (clean.contains("T")) {
-      try {
-        val cleanPrefix = clean.substringBefore(".").substringBefore("+").substringBefore("Z")
-        val sdfUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT).apply {
-          timeZone = java.util.TimeZone.getTimeZone("UTC")
-        }
-        val date = sdfUtc.parse(cleanPrefix)
-        if (date != null) {
-          val sdfLocal = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
-            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-          }
-          return sdfLocal.format(date)
-        }
-      } catch (_: Exception) {}
-      return clean.substringBefore("T")
-    }
-
-    // Handle dd/MM/yyyy or dd-MM-yyyy formats
-    if (clean.matches(Regex("""^\d{1,2}[-/]\d{1,2}[-/]\d{4}$"""))) {
-      val parts = clean.split("-", "/")
-      val d = parts[0].toIntOrNull() ?: 1
-      val m = parts[1].toIntOrNull() ?: 1
-      val y = parts[2].toIntOrNull() ?: 2026
-      return String.format(Locale.ROOT, "%04d-%02d-%02d", y, m, d)
-    }
-
-    return clean.take(10)
-  }
-
-  fun getCurrentIstDate(): String {
-    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
-      timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-    }
-    return sdf.format(java.util.Date())
-  }
-
-  fun getCurrentIstYearMonth(): String {
-    val sdf = java.text.SimpleDateFormat("yyyy-MM", Locale.ROOT).apply {
-      timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-    }
-    return sdf.format(java.util.Date())
-  }
-
-  /**
-   * Converts UTC ISO time strings from Google Apps Script (e.g. "1899-12-30T05:30:00.000Z")
-   * to local Indian Standard Time formatted string ("11:00 AM").
-   */
-  fun parseIsoTimeToLocalTime(rawTimeStr: String?): String {
-    if (rawTimeStr.isNullOrBlank()) return "10:00 AM"
-    val clean = rawTimeStr.trim().replace("\"", "").replace("'", "")
-    if (clean.contains("T")) {
-      try {
-        val cleanPrefix = if (clean.contains(".")) clean.substringBefore(".") else clean.replace("Z", "")
-        val sdfUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT).apply {
-          timeZone = java.util.TimeZone.getTimeZone("UTC")
-        }
-        val date = sdfUtc.parse(cleanPrefix)
-        if (date != null) {
-          val sdfLocal = java.text.SimpleDateFormat("hh:mm a", Locale.ROOT).apply {
-            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-          }
-          return sdfLocal.format(date)
-        }
-      } catch (_: Exception) {}
-    }
-    return clean
-  }
-
-  /**
-   * Fetches full database from Google Sheet (via Webhook or direct CSV fallback)
-   */
-  fun fetchDatabaseFromSheet(): DatabaseDataDto? {
-    // 1. Try Webhook first
+  suspend fun fetchAllData(): Result<DatabaseDataDto> = withContext(Dispatchers.IO) {
     try {
       val request = Request.Builder()
         .url(WEBHOOK_URL)
-        .header("User-Agent", "Mozilla/5.0 PixelPathsala/1.0")
+        .header("User-Agent", "PixelPathsalaApp/1.0 (Android)")
+        .get()
         .build()
 
       val response = client.newCall(request).execute()
-      if (response.isSuccessful) {
-        val bodyStr = response.body?.string()
-        if (!bodyStr.isNullOrBlank() && bodyStr.trim().startsWith("{")) {
-          val json = JSONObject(bodyStr)
-          val dataObj = json.optJSONObject("data")
-          if (dataObj != null) {
-            val dto = parseWebhookData(dataObj)
-            if (dto.students?.isNotEmpty() == true || dto.courses?.isNotEmpty() == true) {
-              Log.d(TAG, "Successfully synced from Google Sheet Webhook!")
-              return dto
-            }
-          }
-        }
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Webhook sync failed, trying direct Google Sheet CSV fallback: ${e.message}")
-    }
+      val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty response body"))
 
-    // 2. Direct Google Sheet CSV Fallback
-    try {
-      return fetchViaDirectCsv()
-    } catch (e: Exception) {
-      Log.e(TAG, "Direct CSV fallback failed: ${e.message}", e)
-    }
+      val rootJson = JSONObject(body)
+      val dataObj = if (rootJson.has("data")) rootJson.getJSONObject("data") else rootJson
 
-    return null
+      val dto = parseWebhookData(dataObj)
+      Result.success(dto)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
   }
 
-  private fun parseWebhookData(dataObj: JSONObject): DatabaseDataDto {
-    val admissions = parseAdmissionsTable(dataObj.optJSONArray("Admissions"))
-    val (courses, batches) = parseCoursesBatchesTable(dataObj.optJSONArray("Courses_Batches"))
-    val students = parseStudentsTable(dataObj.optJSONArray("Students"), admissions, courses)
-    val payments = parsePaymentsTable(dataObj.optJSONArray("Fee_Transactions"))
-    val discounts = parseDiscountsTable(dataObj.optJSONArray("Discounts"))
-    val educators = parseEducatorsTable(dataObj.optJSONArray("Educators"))
-    val centerInfo = parseCenterOverviewTable(dataObj.optJSONArray("Center_Overview"))
-    val adminAccounts = parseAdminsTable(dataObj.optJSONArray("Admin_Credentials"))
-    val liveClasses = parseLiveClassesTable(dataObj.optJSONArray("Live_Classes"))
-    val classRecordings = parseClassRecordingsTable(dataObj.optJSONArray("Class_Recordings"))
-    val studyMaterials = parseStudyMaterialsTable(dataObj.optJSONArray("Study_Materials"))
-    val exams = parseExamsTable(dataObj.optJSONArray("Exams"))
-    val questions = parseQuestionsTable(dataObj.optJSONArray("Question_Bank"))
-    val submissions = parseSubmissionsTable(dataObj.optJSONArray("Exam_Submissions"))
+  suspend fun pushNewPayment(payment: FeePayment): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "recordPayment")
+        put("receiptNo", payment.receiptNo)
+        put("paymentId", payment.id)
+        put("studentId", payment.studentId)
+        put("studentName", payment.studentName)
+        put("amount", payment.finalAmountPaid)
+        put("paymentMode", payment.paymentMode)
+        put("monthsCovered", payment.monthsCovered.joinToString(", "))
+        put("transactionRef", payment.transactionRef ?: "")
+        put("status", payment.status)
+        put("paymentDate", payment.paymentDate)
+        put("approvedBy", payment.approvedBy ?: "")
+        put("remarks", payment.remarks ?: "")
+      }
+
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun pushNewDiscount(discount: Discount): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "addDiscount")
+        put("id", discount.id)
+        put("title", discount.title)
+        put("type", discount.type)
+        put("value", discount.value)
+        put("scope", discount.scope)
+        put("academicClass", discount.academicClass ?: "")
+        put("courseId", discount.courseId ?: "")
+        put("batchId", discount.batchId ?: "")
+        put("studentId", discount.studentId ?: "")
+        put("applicableMonthsType", discount.applicableMonthsType)
+        put("selectedMonths", discount.selectedMonths?.joinToString(", ") ?: "")
+        put("reason", discount.reason ?: "")
+        put("active", if (discount.active) "Active" else "Inactive")
+      }
+
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun updatePaymentApproval(paymentId: String, newStatus: String, approvedBy: String, reason: String?): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "updatePaymentStatus")
+        put("paymentId", paymentId)
+        put("status", newStatus)
+        put("approvedBy", approvedBy)
+        put("rejectionReason", reason ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun pushNewStudent(student: Student): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "addStudent")
+        put("studentId", student.id)
+        put("rollNo", student.rollNo)
+        put("name", student.name)
+        put("mobile", student.mobile)
+        put("aadhaarNo", student.aadhaarNo)
+        put("email", student.email ?: "")
+        put("guardianName", student.guardianName)
+        put("guardianPhone", student.guardianPhone)
+        put("address", student.address)
+        put("courseId", student.courseId)
+        put("batchId", student.batchId)
+        put("admissionDate", student.admissionDate)
+        put("status", student.status)
+        put("customFee", student.customMonthlyFeeOverride ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun pushStudentTelemetry(telemetry: StudentTelemetry): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "recordTelemetry")
+        put("studentId", telemetry.studentId)
+        put("studentName", telemetry.studentName)
+        put("latitude", telemetry.latitude)
+        put("longitude", telemetry.longitude)
+        put("batteryLevel", telemetry.batteryLevel)
+        put("isCharging", telemetry.isCharging)
+        put("networkType", telemetry.networkType)
+        put("gamesDetected", telemetry.installedGames.joinToString(", "))
+        put("focusScore", telemetry.studyFocusScore)
+        put("timestamp", telemetry.lastHeartbeat)
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun pushLiveClass(session: LiveClassSession): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "scheduleClass")
+        put("id", session.id)
+        put("title", session.title)
+        put("subject", session.subject)
+        put("courseId", session.courseId ?: "")
+        put("batchId", session.batchId ?: "")
+        put("educatorName", session.educatorName)
+        put("date", session.scheduledDate)
+        put("startTime", session.startTime)
+        put("endTime", session.endTime)
+        put("status", session.status)
+        put("platform", session.platform)
+        put("meetingUrl", session.meetingUrl ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun pushStudyMaterial(material: StudyMaterial): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "addStudyMaterial")
+        put("id", material.id)
+        put("title", material.title)
+        put("subject", material.subject)
+        put("courseId", material.courseId ?: "")
+        put("batchId", material.batchId ?: "")
+        put("fileType", material.fileType)
+        put("fileUrl", material.fileUrl)
+        put("description", material.description ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun pushExpense(expense: Expense): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "addExpense")
+        put("id", expense.id)
+        put("title", expense.title)
+        put("category", expense.category)
+        put("amount", expense.amount)
+        put("date", expense.expenseDate)
+        put("mode", expense.paymentMode)
+        put("approvedBy", expense.approvedBy)
+        put("remarks", expense.remarks ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  private fun postJson(json: JSONObject): Result<Boolean> {
+    return try {
+      val mediaType = "application/json; charset=utf-8".toMediaType()
+      val requestBody = json.toString().toRequestBody(mediaType)
+      val request = Request.Builder()
+        .url(WEBHOOK_URL)
+        .header("User-Agent", "PixelPathsalaApp/1.0 (Android)")
+        .post(requestBody)
+        .build()
+
+      val response = client.newCall(request).execute()
+      Result.success(response.isSuccessful)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  private fun parseWebhookData(obj: JSONObject): DatabaseDataDto {
+    val students = parseStudents(obj.optJSONArray("Students"))
+    val (courses, batches) = parseCoursesAndBatches(obj.optJSONArray("Courses_Batches"))
+    val payments = parsePayments(obj.optJSONArray("Fee_Transactions"))
+    val discounts = parseDiscounts(obj.optJSONArray("Discounts"))
+    val adminAccounts = parseAdminCredentials(obj.optJSONArray("Admin_Credentials"))
+    val educators = parseEducators(obj.optJSONArray("Educators"))
+    val admissions = parseAdmissions(obj.optJSONArray("Admissions"))
+    val liveClasses = parseLiveClasses(obj.optJSONArray("Live_Classes"))
+    val classRecordings = parseClassRecordings(obj.optJSONArray("Class_Recordings"))
+    val studyMaterials = parseStudyMaterials(obj.optJSONArray("Study_Materials"))
+    val exams = parseExams(obj.optJSONArray("Exams"))
+    val questions = parseQuestions(obj.optJSONArray("Question_Bank"))
+    val submissions = parseSubmissions(obj.optJSONArray("Exam_Submissions"))
+    val expenses = parseExpenses(obj.optJSONArray("Expenses"))
 
     return DatabaseDataDto(
-      centerInfo = centerInfo,
+      centerInfo = LocalDataStore.INITIAL_CENTER,
       students = students,
       courses = courses,
       batches = batches,
+      educators = educators,
       payments = payments,
       admissions = admissions,
       discounts = discounts,
-      educators = educators,
-      adminAccounts = adminAccounts,
       liveClasses = liveClasses,
       classRecordings = classRecordings,
       studyMaterials = studyMaterials,
       exams = exams,
       questions = questions,
-      examSubmissions = submissions
+      examSubmissions = submissions,
+      studentTelemetries = emptyList(),
+      expenses = expenses,
+      adminAccounts = adminAccounts
     )
   }
 
-  private fun parseStudentsTable(
-    array: JSONArray?,
-    admissionsList: List<AdmissionApplication>? = null,
-    coursesList: List<Course>? = null
-  ): List<Student> {
-    val list = mutableListOf<Student>()
-    if (array == null || array.length() <= 1) return list
-
-    // Check header indices if available in row 0
-    val headerRow = array.optJSONArray(0)
-    var customFeeCol = 13
-    var discountCol = -1
-    var admDateCol = 11
-    var baseFeeCol = 14
-    var totalPaidCol = 15
-    var classCol = -1
-
-    if (headerRow != null) {
-      for (c in 0 until headerRow.length()) {
-        val h = headerRow.optString(c, "").lowercase().trim()
-        if (h.contains("discount") || h.contains("concession")) discountCol = c
-        if (h.contains("custom") || h.contains("override")) customFeeCol = c
-        if (h.contains("admission") || h.contains("joining")) admDateCol = c
-        if (h.contains("base fee") || h.contains("monthly base")) baseFeeCol = c
-        if (h.contains("total paid") || h.contains("amount paid")) totalPaidCol = c
-        if (h.contains("class") || h.contains("standard") || h.contains("grade")) classCol = c
-      }
+  private fun parseExpenses(arr: JSONArray?): List<Expense> {
+    if (arr == null) return emptyList()
+    val list = mutableListOf<Expense>()
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      val title = optCell(row, 1)
+      if (id.isBlank() || title.isBlank()) continue
+      val category = optCell(row, 2).ifBlank { "General" }
+      val amount = optCell(row, 3).toDoubleOrNull() ?: 0.0
+      val date = optCell(row, 4)
+      val mode = optCell(row, 5).ifBlank { "CASH" }
+      val approvedBy = optCell(row, 6).ifBlank { "Admin" }
+      val remarks = optCell(row, 7)
+      list.add(
+        Expense(
+          id = id,
+          title = title,
+          category = category,
+          amount = amount,
+          expenseDate = date,
+          paymentMode = mode,
+          approvedBy = approvedBy,
+          remarks = remarks
+        )
+      )
     }
+    return list
+  }
 
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "stu-$i" }
-      val rollNo = optCell(row, 1).ifBlank { "PP-2026-$i" }
-      val name = optCell(row, 2).ifBlank { "Student $i" }
+  private fun optCell(row: JSONArray, index: Int): String {
+    if (index >= row.length()) return ""
+    val item = row.opt(index) ?: return ""
+    return item.toString().trim()
+  }
+
+  private fun parseStudents(arr: JSONArray?): List<Student> {
+    if (arr == null) return emptyList()
+    val list = mutableListOf<Student>()
+    for (i in 1 until arr.length()) { // skip header
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      if (id.isBlank()) continue
+      val rollNo = optCell(row, 1)
+      val name = optCell(row, 2)
       val mobile = optCell(row, 3)
       val aadhaar = optCell(row, 4)
       val email = optCell(row, 5)
@@ -238,38 +326,18 @@ object GoogleSheetSyncService {
       val address = optCell(row, 8)
       val courseId = optCell(row, 9)
       val batchId = optCell(row, 10)
-      val rawDate = optCell(row, admDateCol)
-      val admissionDate = parseIsoDateToLocalDate(rawDate).ifBlank { "2026-08-01" }
-
-      val matchingCourse = coursesList?.find { it.id == courseId }
-      val explicitClass = if (classCol != -1) optCell(row, classCol).ifBlank { null } else null
-      val resolvedClass = explicitClass
-        ?: matchingCourse?.academicClass?.ifBlank { null }
-        ?: matchingCourse?.title?.ifBlank { null }
-        ?: "Class 12"
-
-      val admissionMonth = admissionDate.take(7).ifBlank { "2026-08" }
+      val admissionDate = optCell(row, 11)
       val status = optCell(row, 12).ifBlank { "active" }
-      val customFee = optCell(row, customFeeCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull()
-      val baseFee = if (baseFeeCol != -1) optCell(row, baseFeeCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull() else null
-      val totalPaidInSheet = if (totalPaidCol != -1) optCell(row, totalPaidCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull() else null
+      val customFee = optCell(row, 13).toDoubleOrNull()
+      val totalPaid = optCell(row, 15).toDoubleOrNull()
 
-      val explicitDiscount = if (discountCol != -1) {
-        optCell(row, discountCol).replace("₹", "").replace(",", "").trim().toDoubleOrNull()
-      } else null
-
-      val standardFeeVal = baseFee ?: 400.0
-      val monthlyDiscount = explicitDiscount
-        ?: if (customFee != null && customFee > 0 && customFee < standardFeeVal) {
-          if (customFee <= standardFeeVal / 2) customFee else (standardFeeVal - customFee)
-        } else null
+      val admMonth = FeeCalculator.parseIsoOrMonthToYearMonth(admissionDate) ?: "2026-07"
 
       list.add(
         Student(
           id = id,
           rollNo = rollNo,
           name = name,
-          studentClass = resolvedClass,
           mobile = mobile,
           aadhaarNo = aadhaar,
           email = email,
@@ -279,69 +347,62 @@ object GoogleSheetSyncService {
           courseId = courseId,
           batchId = batchId,
           admissionDate = admissionDate,
-          admissionMonth = admissionMonth,
+          admissionMonth = admMonth,
           status = status,
           customMonthlyFeeOverride = customFee,
-          monthlyDiscount = monthlyDiscount,
-          totalPaidInSheet = totalPaidInSheet
+          totalPaidInSheet = totalPaid
         )
       )
     }
     return list
   }
 
-  private fun parseCoursesBatchesTable(array: JSONArray?): Pair<List<Course>, List<Batch>> {
+  private fun parseCoursesAndBatches(arr: JSONArray?): Pair<List<Course>, List<Batch>> {
+    if (arr == null) return Pair(emptyList(), emptyList())
     val courses = mutableListOf<Course>()
     val batches = mutableListOf<Batch>()
-    if (array == null || array.length() <= 1) return Pair(courses, batches)
 
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val recordType = optCell(row, 0).uppercase()
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val type = optCell(row, 0).uppercase()
       val id = optCell(row, 1)
+      if (id.isBlank()) continue
+      val titleOrName = optCell(row, 2)
 
-      if (recordType == "COURSE") {
-        val title = optCell(row, 2)
+      if (type == "COURSE") {
         val code = optCell(row, 3)
         val academicClass = optCell(row, 4)
-        val category = optCell(row, 5)
-        val fee = optCell(row, 6).toDoubleOrNull() ?: 400.0
-        val isPopular = optCell(row, 7).contains("pop", ignoreCase = true) || fee > 0
-        val description = optCell(row, 8)
-
+        val category = optCell(row, 5).ifBlank { "General" }
+        val monthlyFee = optCell(row, 6).toDoubleOrNull() ?: 400.0
+        val desc = optCell(row, 8)
         courses.add(
           Course(
             id = id,
-            title = title,
+            title = titleOrName,
             code = code,
             academicClass = academicClass,
             category = category,
-            monthlyFee = fee,
-            description = description,
-            isPopular = isPopular
+            monthlyFee = monthlyFee,
+            description = desc
           )
         )
-      } else if (recordType == "BATCH") {
-        val name = optCell(row, 2)
+      } else if (type == "BATCH") {
         val courseId = optCell(row, 3)
-        val timings = optCell(row, 4)
-        val scheduleDays = optCell(row, 5)
-        val maxCapacity = optCell(row, 6).toIntOrNull() ?: 30
-        val educatorId = optCell(row, 7)
-        val room = optCell(row, 8)
+        val timings = optCell(row, 4).ifBlank { "09:00 AM - 11:00 AM" }
+        val schedule = optCell(row, 5).ifBlank { "Sat, Sun" }
+        val maxCap = optCell(row, 6).toIntOrNull() ?: 30
+        val eduId = optCell(row, 7).ifBlank { "edu-1" }
         val mode = optCell(row, 9).ifBlank { "offline" }
-
         batches.add(
           Batch(
             id = id,
-            name = name,
+            name = titleOrName,
             courseId = courseId,
-            timing = timings,
-            scheduleDays = if (scheduleDays.isNotBlank()) scheduleDays.split(",").map { it.trim() } else listOf("Sat", "Sun"),
-            maxCapacity = maxCapacity,
-            educatorId = educatorId,
-            roomNumber = room.ifBlank { "Room 101" },
-            mode = mode
+            timings = timings,
+            scheduleDays = schedule,
+            educatorId = eduId,
+            mode = mode,
+            maxCapacity = maxCap
           )
         )
       }
@@ -349,129 +410,71 @@ object GoogleSheetSyncService {
     return Pair(courses, batches)
   }
 
-  private fun parsePaymentsTable(array: JSONArray?): List<FeePayment> {
+  private fun parsePayments(arr: JSONArray?): List<FeePayment> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<FeePayment>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
       val receiptNo = optCell(row, 0)
-      val paymentId = optCell(row, 1).ifBlank { receiptNo.ifBlank { "pay-$i" } }
+      val paymentId = optCell(row, 1)
       val studentId = optCell(row, 2)
       val studentName = optCell(row, 3)
-      val amountStr = optCell(row, 4).replace("₹", "").replace(",", "").trim()
-      val amount = amountStr.toDoubleOrNull() ?: 0.0
+      val amountPaid = optCell(row, 4).toDoubleOrNull() ?: 0.0
       val mode = optCell(row, 5).ifBlank { "CASH" }
-      val monthsRaw = optCell(row, 6).ifBlank { "Current Session" }
-      val monthsList = if (monthsRaw.contains(",")) monthsRaw.split(",").map { it.trim() } else listOf(monthsRaw)
-      val month = monthsList.firstOrNull() ?: monthsRaw
-      val ref = optCell(row, 7)
-      val date = parseIsoDateToLocalDate(optCell(row, 8)).ifBlank { "2026-10-01" }
-      val rawStatus = optCell(row, 9).trim().lowercase(Locale.ROOT)
-      val status = if (rawStatus.contains("approve")) "approved" else if (rawStatus.contains("reject")) "rejected" else if (rawStatus.contains("pending")) "pending" else "approved"
-      val approvedBy = optCell(row, 10).ifBlank { "Admin" }
-      val remarks = optCell(row, 11)
+      val monthsCoveredRaw = optCell(row, 6)
+      val monthsList = monthsCoveredRaw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+      val txRef = optCell(row, 7)
+      val paymentDate = optCell(row, 8)
+      val status = optCell(row, 9).ifBlank { "approved" }
+      val approvedBy = optCell(row, 10)
+      val rejectionReason = optCell(row, 11)
 
-      if (receiptNo.isBlank() && studentName.isBlank() && amount == 0.0) continue
-
-      list.add(
-        FeePayment(
-          id = paymentId,
-          receiptNo = receiptNo.ifBlank { "REC-AUTO-$i" },
-          studentId = studentId,
-          studentName = studentName,
-          baseMonthlyFee = amount,
-          totalBaseFee = amount,
-          finalAmountPaid = amount,
-          paymentMode = mode,
-          month = month,
-          monthsCovered = monthsList,
-          transactionRef = ref,
-          paymentDate = date,
-          status = status,
-          approvedBy = approvedBy,
-          remarks = remarks
+      if (paymentId.isNotBlank() || receiptNo.isNotBlank()) {
+        list.add(
+          FeePayment(
+            id = paymentId.ifBlank { "pay-${System.currentTimeMillis()}-$i" },
+            receiptNo = receiptNo.ifBlank { "REC-AUTO-$i" },
+            studentId = studentId,
+            studentName = studentName,
+            finalAmountPaid = amountPaid,
+            paymentMode = mode,
+            month = monthsCoveredRaw,
+            monthsCovered = monthsList,
+            transactionRef = txRef,
+            paymentDate = paymentDate,
+            status = status,
+            approvedBy = approvedBy,
+            rejectionReason = rejectionReason
+          )
         )
-      )
+      }
     }
     return list
   }
 
-  private fun parseAdmissionsTable(array: JSONArray?): List<AdmissionApplication> {
-    val list = mutableListOf<AdmissionApplication>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "adm-$i" }
-      val name = optCell(row, 1)
-      val mobile = optCell(row, 2)
-      val aadhaar = optCell(row, 3)
-      val email = optCell(row, 4)
-      val guardianName = optCell(row, 5)
-      val guardianPhone = optCell(row, 6)
-      val courseId = optCell(row, 7)
-      val status = optCell(row, 8).ifBlank { "pending" }
-      val appliedDate = parseIsoDateToLocalDate(optCell(row, 9)).ifBlank { getCurrentIstDate() }
-      val initialFeeStatus = optCell(row, 10).ifBlank { "paid_advance" }
-      val paymentMode = optCell(row, 11).ifBlank { "UPI" }
-      val paymentRef = optCell(row, 12).ifBlank { null }
-      val remarks = optCell(row, 13).ifBlank { null }
-      val rejReason = optCell(row, 14).ifBlank { null }
-      val address = optCell(row, 15)
-
-      list.add(
-        AdmissionApplication(
-          id = id,
-          applicationNo = id,
-          studentName = name,
-          mobile = mobile,
-          aadhaarNo = aadhaar,
-          email = email,
-          guardianName = guardianName,
-          guardianPhone = guardianPhone,
-          targetCourseId = courseId,
-          status = status,
-          appliedDate = appliedDate,
-          initialPaymentStatus = initialFeeStatus,
-          initialPaymentMode = paymentMode,
-          initialPaymentRef = paymentRef,
-          remarks = remarks,
-          rejectionReason = rejReason,
-          address = address
-        )
-      )
-    }
-    return list
-  }
-
-  private fun parseDiscountsTable(array: JSONArray?): List<Discount> {
+  private fun parseDiscounts(arr: JSONArray?): List<Discount> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<Discount>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "disc-$i" }
-      val title = optCell(row, 1).ifBlank { "Fee Concession" }
-      val rawType = optCell(row, 2).lowercase().trim()
-      val type = if (rawType.contains("percent")) "percentage" else "flat"
-      val rawVal = optCell(row, 3).replace("₹", "").replace("%", "").replace(",", "").trim()
-      val value = rawVal.toDoubleOrNull() ?: 250.0
-      val scope = optCell(row, 4).lowercase().trim().ifBlank { "all" }
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      if (id.isBlank()) continue
+      val title = optCell(row, 1)
+      val type = optCell(row, 2).lowercase().ifBlank { "flat" }
+      val value = optCell(row, 3).toDoubleOrNull() ?: 0.0
+      val scope = optCell(row, 4).lowercase().ifBlank { "student" }
       val academicClass = optCell(row, 5).ifBlank { null }
       val courseId = optCell(row, 6).ifBlank { null }
       val batchId = optCell(row, 7).ifBlank { null }
       val studentId = optCell(row, 8).ifBlank { null }
-      val monthsType = optCell(row, 9).lowercase().trim().ifBlank { "all_months" }
+      val monthsType = optCell(row, 9).lowercase().ifBlank { "all_months" }
       val selectedMonthsRaw = optCell(row, 10)
       val selectedMonths = if (selectedMonthsRaw.isNotBlank()) {
         selectedMonthsRaw.split(",").map { it.trim() }
       } else null
-      val reason = optCell(row, 11).ifBlank { null }
-      val activeStr = optCell(row, 12).lowercase().trim()
-      val active = activeStr.isBlank() || activeStr == "active" || activeStr == "true" || activeStr == "yes"
-
-      if (id.isBlank() && title.isBlank()) continue
+      val reason = optCell(row, 11)
+      val activeStr = optCell(row, 12)
+      val active = !activeStr.equals("inactive", ignoreCase = true)
 
       list.add(
         Discount(
@@ -486,1114 +489,257 @@ object GoogleSheetSyncService {
           studentId = studentId,
           applicableMonthsType = monthsType,
           selectedMonths = selectedMonths,
-          active = active,
-          reason = reason
+          reason = reason,
+          active = active
         )
       )
     }
     return list
   }
 
-  private fun parseEducatorsTable(array: JSONArray?): List<Educator> {
+  private fun parseAdminCredentials(arr: JSONArray?): List<AdminAccount> {
+    if (arr == null) return emptyList()
+    val list = mutableListOf<AdminAccount>()
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      val username = optCell(row, 1)
+      if (username.isBlank()) continue
+      val fullName = optCell(row, 2)
+      val role = optCell(row, 3)
+      val email = optCell(row, 4)
+      val pass = optCell(row, 5)
+      val pin = optCell(row, 6)
+      val status = optCell(row, 7).ifBlank { "active" }
+
+      list.add(
+        AdminAccount(
+          id = id.ifBlank { "ADM-001" },
+          username = username,
+          fullName = fullName.ifBlank { "Administrator" },
+          roleTitle = role.ifBlank { "Master Admin" },
+          email = email.ifBlank { "admin@pixelpathsala.com" },
+          passwordHash = pass,
+          securityPin = pin,
+          status = status
+        )
+      )
+    }
+    return list
+  }
+
+  private fun parseEducators(arr: JSONArray?): List<Educator> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<Educator>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "edu-$i" }
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
       val name = optCell(row, 1)
-      val qualification = optCell(row, 2)
-      val subject = optCell(row, 3)
-      val phone = optCell(row, 4)
-      val email = optCell(row, 5)
-      val salary = optCell(row, 6).toDoubleOrNull() ?: 25000.0
-      val exp = optCell(row, 7).toIntOrNull() ?: 10
-      val status = optCell(row, 8).ifBlank { "active" }
-      val photoUrl = optCell(row, 10)
-
+      if (id.isBlank() || name.isBlank()) continue
       list.add(
         Educator(
           id = id,
           name = name,
-          qualification = qualification,
-          subject = subject,
-          phone = phone,
-          email = email,
-          monthlySalary = salary,
-          experienceYears = exp,
-          status = status,
-          photoUrl = photoUrl
+          designation = optCell(row, 2).ifBlank { "Faculty Member" },
+          subject = optCell(row, 3).ifBlank { "Computer Science" },
+          phone = optCell(row, 4),
+          email = optCell(row, 5),
+          qualification = optCell(row, 6).ifBlank { "M.Sc." }
         )
       )
     }
     return list
   }
 
-  private fun parseCenterOverviewTable(array: JSONArray?): CenterInfo {
-    var name = "Pixel Pathsala"
-    var tagline = "Code your dream, decode the future"
-    var address = "Raina"
-    var cityState = "Purba Bardhaman, West Bengal"
-    var phone = "+91 7908457219"
-    var whatsapp = "+91 9775708722"
-    var email = "pixelpathsala+edu@gmail.com"
-    var upiId = "9775708722@apl"
-    var upiName = "Pixel Pathsala Center"
-    var announcement = "Admissions Open for Session 2026-27!"
-
-    if (array != null && array.length() > 1) {
-      for (i in 1 until array.length()) {
-        val row = array.optJSONArray(i) ?: continue
-        val key = optCell(row, 0).lowercase()
-        val value = optCell(row, 1)
-
-        when {
-          key.contains("institute name") -> name = value
-          key.contains("tagline") -> tagline = value
-          key.contains("campus address") -> address = value
-          key.contains("city") -> cityState = value
-          key.contains("primary helpline") -> phone = value
-          key.contains("whatsapp") -> whatsapp = value
-          key.contains("official email") -> email = value
-          key.contains("upi id") -> upiId = value
-          key.contains("upi payee") -> upiName = value
-          key.contains("announcement") -> announcement = value
-        }
-      }
-    }
-
-    return CenterInfo(
-      name = name,
-      tagline = tagline,
-      address = address,
-      cityState = cityState,
-      phonePrimary = phone,
-      whatsapp = whatsapp,
-      email = email,
-      upiId = upiId,
-      upiName = upiName,
-      announcement = announcement
-    )
-  }
-
-  private fun parseAdminsTable(array: JSONArray?): List<AdminAccount> {
-    val list = mutableListOf<AdminAccount>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "ADM-001" }
-      val username = optCell(row, 1).ifBlank { "admin" }
-      val name = optCell(row, 2).ifBlank { "Director / Center Administrator" }
-      val role = optCell(row, 3).ifBlank { "Master Administrator" }
-      val email = optCell(row, 4).ifBlank { "admin@pixelpathsala.com" }
-      val password = optCell(row, 5).ifBlank { "admin123" }
-      val pin = optCell(row, 6).ifBlank { "7722" }
+  private fun parseAdmissions(arr: JSONArray?): List<AdmissionApplication> {
+    if (arr == null) return emptyList()
+    val list = mutableListOf<AdmissionApplication>()
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      if (id.isBlank()) continue
+      val studentName = optCell(row, 1)
+      val mobile = optCell(row, 2)
+      val aadhaar = optCell(row, 3)
+      val email = optCell(row, 4)
+      val guardianName = optCell(row, 5)
+      val guardianPhone = optCell(row, 6)
+      val targetCourseId = optCell(row, 7)
+      val status = optCell(row, 8).ifBlank { "pending" }
+      val appliedDate = optCell(row, 9)
+      val initStatus = optCell(row, 10).ifBlank { "paid_advance" }
+      val mode = optCell(row, 11).ifBlank { "CASH" }
+      val txRef = optCell(row, 12)
+      val remarks = optCell(row, 13)
+      val rejReason = optCell(row, 14)
+      val address = optCell(row, 15)
 
       list.add(
-        AdminAccount(
+        AdmissionApplication(
           id = id,
-          username = username,
-          name = name,
-          role = role,
-          email = email,
-          password = password,
-          securityPin = pin
+          applicationNo = id,
+          studentName = studentName,
+          mobile = mobile,
+          aadhaarNo = aadhaar,
+          email = email.ifBlank { null },
+          guardianName = guardianName,
+          guardianPhone = guardianPhone.ifBlank { mobile },
+          targetCourseId = targetCourseId,
+          status = status,
+          appliedDate = appliedDate,
+          initialPaymentStatus = initStatus,
+          initialPaymentMode = mode,
+          initialPaymentRef = txRef,
+          remarks = remarks,
+          rejectionReason = rejReason,
+          address = address
         )
       )
     }
     return list
   }
 
-  private fun fetchViaDirectCsv(): DatabaseDataDto {
-    val admissions = fetchCsvRows("Admissions", GIDS["Admissions"] ?: "120081180")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseAdmissionsTable(arr)
-    } ?: emptyList()
-
-    val (courses, batches) = fetchCsvRows("Courses_Batches", GIDS["Courses_Batches"] ?: "563739523")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseCoursesBatchesTable(arr)
-    } ?: Pair(emptyList(), emptyList())
-
-    val students = fetchCsvRows("Students", GIDS["Students"] ?: "1572610885")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseStudentsTable(arr, admissions, courses)
-    } ?: emptyList()
-
-    val payments = fetchCsvRows("Fee_Transactions", GIDS["Fee_Transactions"] ?: "154871224")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parsePaymentsTable(arr)
-    } ?: emptyList()
-
-    val discounts = fetchCsvRows("Discounts", GIDS["Discounts"] ?: "1447428203")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseDiscountsTable(arr)
-    } ?: emptyList()
-
-    val educators = fetchCsvRows("Educators", GIDS["Educators"] ?: "1520472103")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseEducatorsTable(arr)
-    } ?: emptyList()
-
-    val centerInfo = fetchCsvRows("Center_Overview", GIDS["Center_Overview"] ?: "25117137")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseCenterOverviewTable(arr)
-    }
-
-    val admins = fetchCsvRows("Admin_Credentials", GIDS["Admin_Credentials"] ?: "371655954")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseAdminsTable(arr)
-    } ?: emptyList()
-
-    val liveClasses = fetchCsvRows("Live_Classes", GIDS["Live_Classes"] ?: "1629684060")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseLiveClassesTable(arr)
-    } ?: emptyList()
-
-    val recordings = fetchCsvRows("Class_Recordings", GIDS["Class_Recordings"] ?: "863738719")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseClassRecordingsTable(arr)
-    } ?: emptyList()
-
-    val studyMaterials = fetchCsvRows("Study_Materials", GIDS["Study_Materials"] ?: "161082531")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseStudyMaterialsTable(arr)
-    } ?: emptyList()
-
-    val exams = fetchCsvRows("Exams", GIDS["Exams"] ?: "1954552249")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseExamsTable(arr)
-    } ?: emptyList()
-
-    val questions = fetchCsvRows("Question_Bank", GIDS["Question_Bank"] ?: "1111711455")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseQuestionsTable(arr)
-    } ?: emptyList()
-
-    val submissions = fetchCsvRows("Exam_Submissions", GIDS["Exam_Submissions"] ?: "1708781557")?.let { rows ->
-      val arr = JSONArray()
-      rows.forEach { r -> arr.put(JSONArray(r)) }
-      parseSubmissionsTable(arr)
-    } ?: emptyList()
-
-    return DatabaseDataDto(
-      centerInfo = centerInfo,
-      students = students,
-      courses = courses,
-      batches = batches,
-      payments = payments,
-      admissions = admissions,
-      discounts = discounts,
-      educators = educators,
-      adminAccounts = admins,
-      liveClasses = liveClasses,
-      classRecordings = recordings,
-      studyMaterials = studyMaterials,
-      exams = exams,
-      questions = questions,
-      examSubmissions = submissions
-    )
-  }
-
-  private fun parseLiveClassesTable(array: JSONArray?): List<LiveClassSession> {
+  private fun parseLiveClasses(arr: JSONArray?): List<LiveClassSession> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<LiveClassSession>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "live-$i" }
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
       val title = optCell(row, 1)
-      if (title.isBlank()) continue
-      val academicClass = optCell(row, 2).ifBlank { "All Classes" }
-      val subject = optCell(row, 3).ifBlank { "General" }
-      val courseId = optCell(row, 4).ifBlank { "all" }
-      val batchId = optCell(row, 5).ifBlank { "all" }
-      val educator = optCell(row, 6).ifBlank { "Faculty Desk" }
-      val date = parseIsoDateToLocalDate(optCell(row, 7)).ifBlank { getCurrentIstDate() }
-      val startTime = optCell(row, 8).ifBlank { "10:00 AM" }
-      val endTime = optCell(row, 9).ifBlank { "11:30 AM" }
-      val status = optCell(row, 10).ifBlank { "scheduled" }
-      val platform = optCell(row, 11).ifBlank { "google_meet" }
-      val meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" }
-      val recordingAvailable = optCell(row, 13).contains("yes", ignoreCase = true)
-      val postponeReason = optCell(row, 14).ifBlank { optCell(row, 15) }.ifBlank { null }
-
+      if (id.isBlank() || title.isBlank()) continue
       list.add(
         LiveClassSession(
           id = id,
           title = title,
-          academicClass = academicClass,
-          targetClass = academicClass,
-          subject = subject,
-          courseId = courseId,
-          batchId = batchId,
-          educatorName = educator,
-          scheduledDate = date,
-          startTime = startTime,
-          endTime = endTime,
-          status = status,
-          platform = platform,
-          meetingUrl = meetingUrl,
-          isRecordingAvailable = recordingAvailable,
-          postponeReason = postponeReason
+          subject = optCell(row, 2).ifBlank { "Computer Science" },
+          courseId = optCell(row, 3),
+          batchId = optCell(row, 4),
+          educatorName = optCell(row, 5).ifBlank { "Faculty" },
+          scheduledDate = optCell(row, 6),
+          startTime = optCell(row, 7).ifBlank { "10:00 AM" },
+          endTime = optCell(row, 8).ifBlank { "11:30 AM" },
+          status = optCell(row, 9).ifBlank { "scheduled" },
+          platform = optCell(row, 10).ifBlank { "Google Meet" },
+          meetingUrl = optCell(row, 11).ifBlank { "https://meet.google.com/new" }
         )
       )
     }
     return list
   }
 
-  private fun parseClassRecordingsTable(array: JSONArray?): List<ClassRecording> {
+  private fun parseClassRecordings(arr: JSONArray?): List<ClassRecording> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<ClassRecording>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "rec-$i" }
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
       val title = optCell(row, 1)
-      if (title.isBlank()) continue
-      val academicClass = optCell(row, 2).ifBlank { "Class 10 (Secondary)" }
-      val subject = optCell(row, 3).ifBlank { "Computer Science" }
-      val topic = optCell(row, 4)
-      val chapter = optCell(row, 5)
-      val courseId = optCell(row, 6).ifBlank { "all" }
-      val batchId = optCell(row, 7).ifBlank { "all" }
-      val educator = optCell(row, 8).ifBlank { "Faculty Desk" }
-      val date = optCell(row, 9)
-      val duration = optCell(row, 10).toIntOrNull() ?: 60
-      val sourceType = optCell(row, 11).ifBlank { "youtube" }
-      val videoUrl = optCell(row, 12).ifBlank { "https://www.youtube.com" }
-      val notesPdf = optCell(row, 13).ifBlank { null }
-      val views = optCell(row, 14).toIntOrNull() ?: 15
-
+      if (id.isBlank() || title.isBlank()) continue
       list.add(
         ClassRecording(
           id = id,
           title = title,
-          academicClass = academicClass,
-          targetClass = academicClass,
-          subject = subject,
-          topic = topic,
-          chapter = chapter,
-          courseId = courseId,
-          batchId = batchId,
-          educatorName = educator,
-          recordedDate = date,
-          durationMinutes = duration,
-          videoSourceType = sourceType,
-          videoUrl = videoUrl,
-          notesPdfUrl = notesPdf,
-          viewCount = views
+          subject = optCell(row, 2),
+          recordingUrl = optCell(row, 3),
+          durationMinutes = optCell(row, 4).toIntOrNull() ?: 60,
+          dateRecorded = optCell(row, 5),
+          description = optCell(row, 6)
         )
       )
     }
     return list
   }
 
-  private fun parseStudyMaterialsTable(array: JSONArray?): List<StudyMaterial> {
+  private fun parseStudyMaterials(arr: JSONArray?): List<StudyMaterial> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<StudyMaterial>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "mat-$i" }
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
       val title = optCell(row, 1)
-      if (title.isBlank()) continue
-      val subject = optCell(row, 2).ifBlank { "General" }
-      val courseId = optCell(row, 3).ifBlank { "all" }
-      val batchId = optCell(row, 4).ifBlank { "all" }
-      val fileType = optCell(row, 5).ifBlank { "pdf" }
-      val fileName = optCell(row, 6).ifBlank { title }
-      val fileSize = optCell(row, 7).ifBlank { "Cloud File" }
-      val fileUrl = optCell(row, 8)
-      val uploadedBy = optCell(row, 9).ifBlank { "Faculty Desk" }
-      val uploadedDate = optCell(row, 10).ifBlank { "2026-09-29" }
-      val downloadCount = optCell(row, 11).toIntOrNull() ?: 0
-      val description = optCell(row, 12)
-
+      if (id.isBlank() || title.isBlank()) continue
       list.add(
         StudyMaterial(
           id = id,
           title = title,
-          subject = subject,
-          courseId = courseId,
-          batchId = batchId,
-          fileType = fileType,
-          fileName = fileName,
-          fileSize = fileSize,
-          fileUrl = fileUrl,
-          uploadedBy = uploadedBy,
-          uploadedDate = uploadedDate,
-          downloadCount = downloadCount,
-          description = description
+          subject = optCell(row, 2),
+          fileUrl = optCell(row, 3),
+          fileType = optCell(row, 4).ifBlank { "PDF" },
+          uploadedDate = optCell(row, 5),
+          description = optCell(row, 6)
         )
       )
     }
     return list
   }
 
-  private fun parseExamsTable(array: JSONArray?): List<OnlineExam> {
+  private fun parseExams(arr: JSONArray?): List<OnlineExam> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<OnlineExam>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "exam-$i" }
-      val code = optCell(row, 1).ifBlank { "EX-$i" }
-      val title = optCell(row, 2)
-      if (title.isBlank()) continue
-      val courseId = optCell(row, 3).ifBlank { "all" }
-      val batchId = optCell(row, 4).ifBlank { "all" }
-      val academicClass = optCell(row, 5).ifBlank { "Class 10" }
-      val subject = optCell(row, 6).ifBlank { "General" }
-      val duration = optCell(row, 7).toIntOrNull() ?: 30
-      val totalMarks = optCell(row, 8).toIntOrNull() ?: 20
-      val passingMarks = optCell(row, 9).toIntOrNull() ?: 8
-      val passingPct = optCell(row, 10).toIntOrNull() ?: 40
-      val status = optCell(row, 11).ifBlank { "active" }
-      val mode = optCell(row, 12).ifBlank { "online" }
-      val scheduledDate = parseIsoDateToLocalDate(optCell(row, 13)).ifBlank { getCurrentIstDate() }
-      val startTime = optCell(row, 14).ifBlank { "09:00 AM" }
-      val endTime = optCell(row, 15).ifBlank { "09:00 PM" }
-      val questionIdsStr = optCell(row, 17)
-      val questionIds = if (questionIdsStr.isNotBlank()) questionIdsStr.split(",").map { it.trim() } else emptyList()
-      val instructions = optCell(row, 18).ifBlank { "Read each question carefully." }
-      val isPublished = optCell(row, 19).isBlank() || optCell(row, 19).contains("yes", ignoreCase = true) || optCell(row, 19) == "true"
-
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      val title = optCell(row, 1)
+      if (id.isBlank() || title.isBlank()) continue
       list.add(
         OnlineExam(
           id = id,
-          examCode = code,
           title = title,
-          courseId = courseId,
-          batchId = batchId,
-          academicClass = academicClass,
-          subject = subject,
-          durationMinutes = duration,
-          totalMarks = totalMarks,
-          passingMarks = passingMarks,
-          passingPercentage = passingPct,
-          status = status,
-          mode = mode,
-          scheduledDate = scheduledDate,
-          startTime = startTime,
-          endTime = endTime,
-          questionIds = questionIds,
-          instructions = instructions,
-          isPublished = isPublished
+          subject = optCell(row, 2),
+          totalMarks = optCell(row, 4).toIntOrNull() ?: 20,
+          durationMinutes = optCell(row, 5).toIntOrNull() ?: 30,
+          scheduledDate = optCell(row, 6),
+          status = optCell(row, 7).ifBlank { "published" }
         )
       )
     }
     return list
   }
 
-  private fun parseQuestionsTable(array: JSONArray?): List<ExamQuestion> {
+  private fun parseQuestions(arr: JSONArray?): List<ExamQuestion> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<ExamQuestion>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "q-$i" }
-      val courseId = optCell(row, 1).ifBlank { "all" }
-      val academicClass = optCell(row, 2)
-      val subject = optCell(row, 3).ifBlank { "General" }
-      val topic = optCell(row, 4).ifBlank { "Fundamentals" }
-      val marks = optCell(row, 5).toIntOrNull() ?: 2
-      val difficulty = optCell(row, 6).ifBlank { "medium" }
-      val text = optCell(row, 7)
-      if (text.isBlank()) continue
-      val optA = optCell(row, 8)
-      val optB = optCell(row, 9)
-      val optC = optCell(row, 10)
-      val optD = optCell(row, 11)
-      val options = listOf(optA, optB, optC, optD).filter { it.isNotBlank() }
-      val correctIdx = optCell(row, 12).toIntOrNull() ?: 0
-      val codeSnippet = optCell(row, 13).ifBlank { null }
-      val explanation = optCell(row, 14).ifBlank { null }
-
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      val qText = optCell(row, 2)
+      if (id.isBlank() || qText.isBlank()) continue
       list.add(
         ExamQuestion(
           id = id,
-          courseId = courseId,
-          academicClass = academicClass,
-          subject = subject,
-          topic = topic,
-          marks = marks,
-          difficulty = difficulty,
-          questionText = text,
-          options = options,
-          correctOptionIndex = correctIdx,
-          codeSnippet = codeSnippet,
-          explanation = explanation
+          examId = optCell(row, 1),
+          questionText = qText,
+          optionA = optCell(row, 3),
+          optionB = optCell(row, 4),
+          optionC = optCell(row, 5),
+          optionD = optCell(row, 6),
+          correctOption = optCell(row, 7).ifBlank { "A" },
+          marks = optCell(row, 8).toIntOrNull() ?: 1
         )
       )
     }
     return list
   }
 
-  private fun parseSubmissionsTable(array: JSONArray?): List<ExamSubmission> {
+  private fun parseSubmissions(arr: JSONArray?): List<ExamSubmission> {
+    if (arr == null) return emptyList()
     val list = mutableListOf<ExamSubmission>()
-    if (array == null || array.length() <= 1) return list
-
-    for (i in 1 until array.length()) {
-      val row = array.optJSONArray(i) ?: continue
-      val id = optCell(row, 0).ifBlank { "sub-$i" }
-      val examId = optCell(row, 1)
-      val examTitle = optCell(row, 2)
-      val studentId = optCell(row, 3)
-      val studentName = optCell(row, 4)
-      val rollNo = optCell(row, 5)
-      val score = optCell(row, 9).toIntOrNull() ?: 0
-      val total = optCell(row, 10).toIntOrNull() ?: 20
-      val pct = optCell(row, 11).toIntOrNull() ?: 0
-      val passed = optCell(row, 12).contains("pass", ignoreCase = true)
-      val timeSpent = optCell(row, 13).toIntOrNull() ?: 0
-      val submittedAt = optCell(row, 14)
-
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val id = optCell(row, 0)
+      if (id.isBlank()) continue
       list.add(
         ExamSubmission(
           id = id,
-          examId = examId,
-          examTitle = examTitle,
-          studentId = studentId,
-          studentName = studentName,
-          studentRollNo = rollNo,
-          score = score,
-          totalMarks = total,
-          percentage = pct,
-          passed = passed,
-          timeSpentSeconds = timeSpent,
-          submittedAt = submittedAt
+          examId = optCell(row, 1),
+          studentId = optCell(row, 2),
+          studentName = optCell(row, 3),
+          score = optCell(row, 4).toIntOrNull() ?: 0,
+          totalMarks = optCell(row, 5).toIntOrNull() ?: 20,
+          submittedAt = optCell(row, 6)
         )
       )
     }
     return list
-  }
-
-  private fun fetchCsvRows(name: String, gid: String): List<List<String>>? {
-    val url = "https://docs.google.com/spreadsheets/d/$SPREADSHEET_ID/export?format=csv&gid=$gid"
-    val req = Request.Builder()
-      .url(url)
-      .header("User-Agent", "Mozilla/5.0 PixelPathsala/1.0")
-      .build()
-
-    val res = client.newCall(req).execute()
-    if (!res.isSuccessful) return null
-    val csv = res.body?.string() ?: return null
-
-    val rows = mutableListOf<List<String>>()
-    val reader = BufferedReader(StringReader(csv))
-    var line: String?
-    while (reader.readLine().also { line = it } != null) {
-      val parsedLine = parseCsvLine(line!!)
-      rows.add(parsedLine)
-    }
-    return rows
-  }
-
-  private fun parseCsvLine(line: String): List<String> {
-    val tokens = mutableListOf<String>()
-    var inQuotes = false
-    val sb = StringBuilder()
-    for (ch in line) {
-      if (ch == '\"') {
-        inQuotes = !inQuotes
-      } else if (ch == ',' && !inQuotes) {
-        tokens.add(sb.toString().trim().removeSurrounding("\""))
-        sb.clear()
-      } else {
-        sb.append(ch)
-      }
-    }
-    tokens.add(sb.toString().trim().removeSurrounding("\""))
-    return tokens
-  }
-
-  private fun optCell(row: JSONArray, index: Int): String {
-    if (index >= row.length()) return ""
-    val item = row.opt(index) ?: return ""
-    return item.toString().trim()
-  }
-
-  // ==========================================
-  // WRITE OPERATIONS TO GOOGLE SHEETS
-  // ==========================================
-
-  fun postToWebhook(jsonPayload: String): Boolean {
-    return try {
-      val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
-      val body = jsonPayload.toRequestBody(mediaType)
-      val request = Request.Builder()
-        .url(WEBHOOK_URL)
-        .header("User-Agent", "Mozilla/5.0 PixelPathsala/1.0")
-        .post(body)
-        .build()
-
-      val response = client.newCall(request).execute()
-      val resString = response.body?.string() ?: ""
-      println("DEBUG postToWebhook code: ${response.code}, body: $resString")
-      Log.d(TAG, "postToWebhook response code: ${response.code}, body: $resString")
-      response.isSuccessful || resString.contains("\"success\":true")
-    } catch (e: Exception) {
-      println("DEBUG postToWebhook exception: ${e.message}")
-      e.printStackTrace()
-      Log.e(TAG, "postToWebhook failed: ${e.message}", e)
-      false
-    }
-  }
-
-  fun appendStudent(student: Student): Boolean {
-    val row = listOf(
-      student.id,
-      student.rollNo,
-      student.name,
-      student.mobile,
-      student.aadhaarNo,
-      student.email ?: "",
-      student.guardianName,
-      student.guardianPhone,
-      student.address,
-      student.courseId,
-      student.batchId,
-      student.admissionDate,
-      student.status,
-      student.customMonthlyFeeOverride?.toString() ?: "",
-      "",
-      "",
-      ""
-    )
-    val json = JSONObject()
-    json.put("action", "addStudent")
-    val rowArr = JSONArray()
-    row.forEach { rowArr.put(it) }
-    json.put("row", rowArr)
-    return postToWebhook(json.toString())
-  }
-
-  fun appendPayment(payment: FeePayment): Boolean {
-    val row = listOf(
-      payment.receiptNo,
-      payment.id,
-      payment.studentId,
-      payment.studentName,
-      payment.finalAmountPaid,
-      payment.paymentMode,
-      payment.monthsCovered.joinToString(","),
-      payment.transactionRef,
-      payment.paymentDate,
-      payment.status,
-      payment.approvedBy,
-      payment.remarks ?: payment.rejectionReason ?: ""
-    )
-    val json = JSONObject()
-    json.put("action", "addPayment")
-    val rowArr = JSONArray()
-    row.forEach { rowArr.put(it) }
-    json.put("row", rowArr)
-    return postToWebhook(json.toString())
-  }
-
-  fun appendAdmission(app: AdmissionApplication): Boolean {
-    val row = listOf(
-      app.id,
-      app.studentName,
-      app.mobile,
-      app.aadhaarNo,
-      app.email ?: "",
-      app.guardianName,
-      app.guardianPhone,
-      app.targetCourseId,
-      app.status,
-      app.appliedDate,
-      app.initialPaymentStatus,
-      app.initialPaymentMode ?: "CASH",
-      app.initialPaymentRef ?: "",
-      app.remarks ?: "",
-      app.rejectionReason ?: "",
-      app.address
-    )
-    val json = JSONObject()
-    json.put("action", "addAdmission")
-    val rowArr = JSONArray()
-    row.forEach { rowArr.put(it) }
-    json.put("row", rowArr)
-    return postToWebhook(json.toString())
-  }
-
-  fun pushStudentsTable(students: List<Student>): Boolean {
-    val headers = listOf(
-      "Student ID", "Roll No", "Full Name", "Mobile Number", "Aadhaar No", "Email",
-      "Guardian Name", "Guardian Phone", "Residential Address", "Course ID", "Batch ID",
-      "Admission Date", "Status", "Custom Fee Override (₹)", "Monthly Base Fee (₹)",
-      "Total Paid (₹)", "Outstanding Due (₹)"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (s in students) {
-      rows.add(
-        listOf(
-          s.id,
-          s.rollNo,
-          s.name,
-          s.mobile,
-          s.aadhaarNo,
-          s.email ?: "",
-          s.guardianName,
-          s.guardianPhone,
-          s.address,
-          s.courseId,
-          s.batchId,
-          s.admissionDate,
-          s.status,
-          s.customMonthlyFeeOverride?.toString() ?: "",
-          "",
-          "",
-          ""
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Students", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushPaymentsTable(payments: List<FeePayment>): Boolean {
-    val headers = listOf(
-      "Receipt No", "Payment ID", "Student ID", "Student Name", "Amount Paid (₹)",
-      "Payment Mode", "Months Covered", "Transaction Ref / UPI", "Payment Date",
-      "Approval Status", "Approved By", "Rejection Reason"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (p in payments) {
-      rows.add(
-        listOf(
-          p.receiptNo,
-          p.id,
-          p.studentId,
-          p.studentName,
-          p.finalAmountPaid,
-          p.paymentMode,
-          p.monthsCovered.joinToString(","),
-          p.transactionRef,
-          p.paymentDate,
-          p.status,
-          p.approvedBy,
-          p.remarks ?: p.rejectionReason ?: ""
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Fee_Transactions", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushAdmissionsTable(admissions: List<AdmissionApplication>): Boolean {
-    val headers = listOf(
-      "Application ID", "Student Name", "Mobile Number", "Aadhaar No", "Email",
-      "Guardian Name", "Guardian Phone", "Target Course ID", "Status", "Applied Date",
-      "Initial Fee Status", "Payment Mode", "Transaction Ref / UPI", "Staff Remarks",
-      "Rejection Reason", "Address"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (a in admissions) {
-      rows.add(
-        listOf(
-          a.id,
-          a.studentName,
-          a.mobile,
-          a.aadhaarNo,
-          a.email ?: "",
-          a.guardianName,
-          a.guardianPhone,
-          a.targetCourseId,
-          a.status,
-          a.appliedDate,
-          a.initialPaymentStatus,
-          a.initialPaymentMode ?: "CASH",
-          a.initialPaymentRef ?: "",
-          a.remarks ?: "",
-          a.rejectionReason ?: "",
-          a.address
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Admissions", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushLiveClassesTable(sessions: List<LiveClassSession>): Boolean {
-    val headers = listOf(
-      "Session ID", "Class Title", "Academic Class", "Subject", "Course ID",
-      "Batch ID", "Educator Name", "Date", "Start Time", "End Time",
-      "Status", "Platform", "Meeting Link / Room ID", "Recording Available", "Created At"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (s in sessions) {
-      rows.add(
-        listOf(
-          s.id,
-          s.title,
-          s.academicClass ?: s.targetClass ?: "All Classes",
-          s.subject,
-          s.courseId,
-          s.batchId,
-          s.educatorName,
-          s.scheduledDate,
-          s.startTime,
-          s.endTime,
-          s.status,
-          s.platform,
-          s.meetingUrl ?: "https://meet.google.com/new",
-          if (s.isRecordingAvailable) "Yes" else "No",
-          s.scheduledDate
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Live_Classes", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushRecordingsTable(recordings: List<ClassRecording>): Boolean {
-    val headers = listOf(
-      "Recording ID", "Title", "Academic Class", "Subject", "Topic",
-      "Chapter", "Course ID", "Batch ID", "Educator Name", "Recorded Date",
-      "Duration (Mins)", "Source Type", "Video URL", "Notes PDF URL", "View Count", "Created At"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (r in recordings) {
-      rows.add(
-        listOf(
-          r.id,
-          r.title,
-          r.academicClass ?: r.targetClass ?: "All Classes",
-          r.subject,
-          r.topic ?: "",
-          r.chapter ?: "",
-          r.courseId,
-          r.batchId,
-          r.educatorName,
-          r.recordedDate,
-          r.durationMinutes,
-          r.videoSourceType,
-          r.videoUrl,
-          r.notesPdfUrl ?: "",
-          r.viewCount,
-          r.recordedDate
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Class_Recordings", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushStudyMaterialsTable(materials: List<StudyMaterial>): Boolean {
-    val headers = listOf(
-      "Material ID", "Title", "Subject", "Course ID", "Batch ID",
-      "File Type", "File Name", "File Size", "File URL / Link", "Uploaded By",
-      "Uploaded Date", "Download Count", "Description"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (m in materials) {
-      rows.add(
-        listOf(
-          m.id,
-          m.title,
-          m.subject ?: "General",
-          m.courseId,
-          m.batchId,
-          m.fileType,
-          m.fileName,
-          m.fileSize ?: "Cloud File",
-          m.fileUrl,
-          m.uploadedBy,
-          m.uploadedDate,
-          m.downloadCount,
-          m.description ?: ""
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Study_Materials", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushExamsTable(exams: List<OnlineExam>): Boolean {
-    val headers = listOf(
-      "Exam ID", "Exam Code", "Title", "Course ID", "Batch ID",
-      "Academic Class", "Subject", "Duration (Mins)", "Total Marks", "Passing Marks",
-      "Passing %", "Status", "Mode", "Scheduled Date", "Start Time",
-      "End Time", "Question Count", "Question IDs", "Instructions", "Published", "Created At"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (e in exams) {
-      rows.add(
-        listOf(
-          e.id,
-          e.examCode,
-          e.title,
-          e.courseId,
-          e.batchId,
-          e.academicClass ?: "Class 10",
-          e.subject,
-          e.durationMinutes,
-          e.totalMarks,
-          e.passingMarks,
-          e.passingPercentage,
-          e.status,
-          e.mode,
-          e.scheduledDate,
-          e.startTime,
-          e.endTime,
-          e.questionIds.size,
-          e.questionIds.joinToString(","),
-          e.instructions ?: "Read each question carefully.",
-          if (e.isPublished) "Yes" else "No",
-          e.scheduledDate
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Exams", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushQuestionsTable(questions: List<ExamQuestion>): Boolean {
-    val headers = listOf(
-      "Question ID", "Course ID", "Academic Class", "Subject", "Topic",
-      "Marks", "Difficulty", "Question Text", "Option A", "Option B",
-      "Option C", "Option D", "Correct Option Index", "Code Snippet", "Explanation", "Created At"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (q in questions) {
-      val optA = q.options.getOrNull(0) ?: ""
-      val optB = q.options.getOrNull(1) ?: ""
-      val optC = q.options.getOrNull(2) ?: ""
-      val optD = q.options.getOrNull(3) ?: ""
-      rows.add(
-        listOf(
-          q.id,
-          q.courseId,
-          q.academicClass ?: "",
-          q.subject,
-          q.topic,
-          q.marks,
-          q.difficulty,
-          q.questionText,
-          optA,
-          optB,
-          optC,
-          optD,
-          q.correctOptionIndex,
-          q.codeSnippet ?: "",
-          q.explanation ?: "",
-          "2026-09-29"
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Question_Bank", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushExamSubmissionsTable(submissions: List<ExamSubmission>): Boolean {
-    val headers = listOf(
-      "Submission ID", "Exam ID", "Exam Title", "Student ID", "Student Name",
-      "Roll No", "Aadhaar No", "Course ID", "Batch ID", "Score Obtained",
-      "Total Marks", "Percentage (%)", "Result Status", "Time Spent (Secs)", "Submitted At", "Answers Summary"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (sub in submissions) {
-      rows.add(
-        listOf(
-          sub.id,
-          sub.examId,
-          sub.examTitle,
-          sub.studentId,
-          sub.studentName,
-          sub.studentRollNo ?: "",
-          "",
-          "",
-          "",
-          sub.score,
-          sub.totalMarks,
-          sub.percentage,
-          if (sub.passed) "PASSED" else "NEEDS_IMPROVEMENT",
-          sub.timeSpentSeconds,
-          sub.submittedAt,
-          ""
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Exam_Submissions", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
-  }
-
-  fun pushDiscountsTable(discounts: List<Discount>): Boolean {
-    val headers = listOf(
-      "Discount ID", "Discount Title", "Discount Type (flat/percentage)", "Value (₹ / %)",
-      "Scope (all/class/course/batch/student)", "Target Academic Class", "Target Course ID",
-      "Target Batch ID", "Target Student ID", "Applicable Months Type", "Selected Months",
-      "Reason / Description", "Active Status", "Created At"
-    )
-    val rows = mutableListOf<List<Any?>>()
-    rows.add(headers)
-    for (d in discounts) {
-      rows.add(
-        listOf(
-          d.id,
-          d.title,
-          d.type,
-          d.value,
-          d.scope,
-          d.academicClass ?: "",
-          d.courseId ?: "",
-          d.batchId ?: "",
-          d.studentId ?: "",
-          d.applicableMonthsType,
-          d.selectedMonths?.joinToString(", ") ?: "",
-          d.reason ?: "",
-          if (d.active) "Active" else "Inactive",
-          getCurrentIstDate()
-        )
-      )
-    }
-
-    val json = JSONObject()
-    json.put("action", "saveAll")
-    val tables = JSONObject()
-    val arr = JSONArray()
-    for (row in rows) {
-      val rowArr = JSONArray()
-      row.forEach { rowArr.put(it ?: "") }
-      arr.put(rowArr)
-    }
-    tables.put("Discounts", arr)
-    json.put("tables", tables)
-
-    return postToWebhook(json.toString())
   }
 }
