@@ -2,6 +2,7 @@ package com.example.ui.admin
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.example.data.model.Batch
 import com.example.data.model.Course
 import com.example.data.model.LiveClassSession
@@ -40,7 +42,9 @@ fun AdminAcademicTab(
   onDeleteClass: (String) -> Unit,
   onAddNote: (StudyMaterial) -> Unit,
   onUpdateNote: (StudyMaterial) -> Unit,
-  onDeleteNote: (String) -> Unit
+  onDeleteNote: (String) -> Unit,
+  onTogglePostpone: (String, Boolean, String?) -> Unit = { _, _, _ -> },
+  onSendNotification: (LiveClassSession) -> Unit = {}
 ) {
   var activeSubTab by remember { mutableIntStateOf(0) } // 0: Scheduled Classes, 1: Notes as Web Portal
 
@@ -51,6 +55,15 @@ fun AdminAcademicTab(
   var showAddNoteDialog by remember { mutableStateOf(false) }
   var editingNote by remember { mutableStateOf<StudyMaterial?>(null) }
   var deletingNoteId by remember { mutableStateOf<String?>(null) }
+
+  var selectedBatchFilter by remember { mutableStateOf<String?>(null) }
+  var postponingSession by remember { mutableStateOf<LiveClassSession?>(null) }
+  var postponeReasonText by remember { mutableStateOf("") }
+  var notifConfirmationSession by remember { mutableStateOf<LiveClassSession?>(null) }
+
+  val automatedSchedule = remember(batches, courses, liveClasses, selectedBatchFilter) {
+    com.example.util.BatchScheduleHelper.getAllBatchesAutomatedSchedule(batches, courses, liveClasses, selectedBatchFilter)
+  }
 
   val context = LocalContext.current
 
@@ -111,8 +124,8 @@ fun AdminAcademicTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column {
-              Text(text = "Scheduled Classes", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
-              Text(text = "Manage live sessions, timetable & portal links", fontSize = 12.sp, color = Slate600)
+              Text(text = "Automated Class Schedule", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
+              Text(text = "Synced as per batch timetable & calendar routine", fontSize = 12.sp, color = Slate600)
             }
             Button(
               onClick = { showAddClassDialog = true },
@@ -121,12 +134,35 @@ fun AdminAcademicTab(
             ) {
               Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(4.dp))
-              Text("Schedule Class", fontSize = 12.sp)
+              Text("Add Class", fontSize = 12.sp)
             }
           }
         }
 
-        if (liveClasses.isEmpty()) {
+        // Batch Filter Chips
+        item {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            FilterChip(
+              selected = selectedBatchFilter == null,
+              onClick = { selectedBatchFilter = null },
+              label = { Text("All Batches (${automatedSchedule.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+            )
+            batches.forEach { b ->
+              FilterChip(
+                selected = selectedBatchFilter == b.id,
+                onClick = { selectedBatchFilter = if (selectedBatchFilter == b.id) null else b.id },
+                label = { Text("${b.name} (${b.scheduleDays})", fontSize = 11.sp) }
+              )
+            }
+          }
+        }
+
+        if (automatedSchedule.isEmpty()) {
           item {
             Card(
               shape = RoundedCornerShape(12.dp),
@@ -141,19 +177,21 @@ fun AdminAcademicTab(
               ) {
                 Icon(Icons.Default.EventBusy, contentDescription = null, tint = Slate400, modifier = Modifier.size(40.dp))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("No classes scheduled yet.", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Slate700)
-                Text("Click '+ Schedule Class' above to schedule a class with meeting/portal link.", fontSize = 12.sp, color = Slate500)
+                Text("No upcoming classes scheduled for this batch.", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Slate700)
+                Text("Classes are automatically generated as per batch schedule days & timings.", fontSize = 12.sp, color = Slate500)
               }
             }
           }
         } else {
-          items(liveClasses.reversed()) { session ->
+          items(automatedSchedule) { session ->
             val course = courses.firstOrNull { it.id == session.courseId }
             val batch = batches.firstOrNull { it.id == session.batchId }
 
             Card(
               shape = RoundedCornerShape(14.dp),
-              colors = CardDefaults.cardColors(containerColor = Color.White),
+              colors = CardDefaults.cardColors(
+                containerColor = if (session.isPostponed) Color(0xFFFFFBEB) else Color.White
+              ),
               elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
               modifier = Modifier.fillMaxWidth()
             ) {
@@ -163,48 +201,127 @@ fun AdminAcademicTab(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text(text = session.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+                  Text(text = session.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
                   Surface(
-                    color = if (session.status == "live") ErrorRedLight else BrandGoldLight,
+                    color = if (session.isPostponed) ErrorRedLight else if (session.status == "live") Color(0xFFFEE2E2) else BrandGoldLight,
                     shape = RoundedCornerShape(6.dp)
                   ) {
                     Text(
-                      text = session.status.uppercase(),
+                      text = if (session.isPostponed) "POSTPONED" else session.status.uppercase(),
                       fontSize = 11.sp,
                       fontWeight = FontWeight.Bold,
-                      color = if (session.status == "live") ErrorRed else BrandGoldDark,
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                      color = if (session.isPostponed) ErrorRed else if (session.status == "live") ErrorRed else BrandGoldDark,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                   }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                  text = "Subject: ${session.subject} • Faculty: ${session.educatorName}",
+                  text = "Date: ${session.scheduledDate} • Timings: ${session.startTime} - ${session.endTime}",
                   fontSize = 12.sp,
-                  color = Slate700,
-                  fontWeight = FontWeight.Medium
+                  fontWeight = FontWeight.SemiBold,
+                  color = if (session.isPostponed) ErrorRed else BrandPrimary
                 )
                 Text(
-                  text = "Target Batch: ${batch?.name ?: "All Admission Batches"} • Course: ${course?.title ?: "All Courses"}",
-                  fontSize = 12.sp,
-                  color = BrandPrimary
-                )
-                Text(
-                  text = "Timings: ${session.startTime} - ${session.endTime} (${session.scheduledDate.ifBlank { "Regular" }})",
-                  fontSize = 12.sp,
+                  text = "Batch: ${batch?.name ?: "Main Batch"} (${batch?.scheduleDays ?: "Scheduled"}) • Mode: ${session.platform}",
+                  fontSize = 11.sp,
                   color = Slate600
                 )
-                if (!session.meetingUrl.isNullOrBlank()) {
-                  Text(
-                    text = "Portal Link: ${session.meetingUrl}",
-                    fontSize = 11.sp,
-                    color = Slate500,
-                    maxLines = 1
-                  )
+                Text(
+                  text = "Subject: ${session.subject} • Faculty: ${session.educatorName}",
+                  fontSize = 11.sp,
+                  color = Slate600
+                )
+
+                if (session.isPostponed) {
+                  Spacer(modifier = Modifier.height(8.dp))
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFFEE2E2),
+                    modifier = Modifier.fillMaxWidth()
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(10.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(16.dp))
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text(
+                        text = "Notice: ${session.postponeReason ?: "Class postponed by faculty."}",
+                        fontSize = 12.sp,
+                        color = ErrorRed,
+                        fontWeight = FontWeight.Medium
+                      )
+                    }
+                  }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Postpone Switch and Send Notification Controls
+                Surface(
+                  shape = RoundedCornerShape(10.dp),
+                  color = Color(0xFFF8FAFC),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Text(
+                        text = if (session.isPostponed) "Class Postponed" else "Schedule Active",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (session.isPostponed) ErrorRed else Slate700
+                      )
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Switch(
+                        checked = session.isPostponed,
+                        onCheckedChange = { isChecked ->
+                          if (isChecked) {
+                            postponingSession = session
+                            postponeReasonText = session.postponeReason ?: "Postponed due to center maintenance / reschedule"
+                          } else {
+                            onTogglePostpone(session.id, false, null)
+                            onUpdateClass(session.copy(isPostponed = false, status = "scheduled", postponeReason = null))
+                            Toast.makeText(context, "Class schedule restored to Active", Toast.LENGTH_SHORT).show()
+                          }
+                        }
+                      )
+                    }
+
+                    Button(
+                      onClick = {
+                        onSendNotification(session)
+                        onUpdateClass(session.copy(notificationSent = true))
+                        notifConfirmationSession = session
+                        Toast.makeText(context, "Notification dispatched for ${batch?.name ?: session.title}!", Toast.LENGTH_SHORT).show()
+                      },
+                      colors = ButtonDefaults.buttonColors(
+                        containerColor = if (session.notificationSent) SuccessGreen else BrandPrimary
+                      ),
+                      shape = RoundedCornerShape(8.dp),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                      Icon(
+                        imageVector = if (session.notificationSent) Icons.Default.CheckCircle else Icons.Default.NotificationsActive,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                      )
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text(if (session.notificationSent) "Notified" else "Notify", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Actions row
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -223,7 +340,7 @@ fun AdminAcademicTab(
                     ) {
                       Icon(Icons.Default.Launch, contentDescription = null, modifier = Modifier.size(16.dp))
                       Spacer(modifier = Modifier.width(4.dp))
-                      Text("Launch Portal", fontSize = 12.sp)
+                      Text("Portal", fontSize = 12.sp)
                     }
                   }
 
@@ -237,7 +354,7 @@ fun AdminAcademicTab(
                   }
 
                   IconButton(
-                    onClick = { deletingClassId = session.id }
+                    onClick = { onDeleteClass(session.id) }
                   ) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed)
                   }
@@ -432,6 +549,116 @@ fun AdminAcademicTab(
       },
       dismissButton = {
         TextButton(onClick = { deletingClassId = null }) { Text("Cancel") }
+      }
+    )
+  }
+
+  if (postponingSession != null) {
+    AlertDialog(
+      onDismissRequest = { postponingSession = null },
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Postpone Class Session?", fontWeight = FontWeight.Bold)
+        }
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text(
+            text = "Enter a notice/reason for students explaining why this session is postponed:",
+            fontSize = 13.sp,
+            color = Slate600
+          )
+          OutlinedTextField(
+            value = postponeReasonText,
+            onValueChange = { postponeReasonText = it },
+            label = { Text("Postpone Notice / Reason *") },
+            placeholder = { Text("e.g. Faculty medical leave / Center holiday") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val session = postponingSession!!
+            val updated = session.copy(
+              isPostponed = true,
+              status = "postponed",
+              postponeReason = postponeReasonText.trim().ifBlank { "Postponed by faculty" }
+            )
+            onTogglePostpone(session.id, true, updated.postponeReason)
+            onUpdateClass(updated)
+            Toast.makeText(context, "Class marked as Postponed with student notice", Toast.LENGTH_SHORT).show()
+            postponingSession = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+        ) {
+          Text("Confirm Postpone", color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { postponingSession = null }) { Text("Cancel") }
+      }
+    )
+  }
+
+  if (notifConfirmationSession != null) {
+    val session = notifConfirmationSession!!
+    val batch = batches.firstOrNull { it.id == session.batchId }
+    val msg = "📢 Pixel Pathsala Alert: Class for ${batch?.name ?: session.title} on ${session.scheduledDate} (${session.startTime}) is ${if (session.isPostponed) "POSTPONED: ${session.postponeReason ?: "Rescheduled"}" else "SCHEDULED (Active)"}. Please check your student portal."
+
+    AlertDialog(
+      onDismissRequest = { notifConfirmationSession = null },
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = SuccessGreen)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Class Notification Sent", fontWeight = FontWeight.Bold)
+        }
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text(
+            text = "In-app broadcast alert has been sent to all enrolled students for this batch.",
+            fontSize = 13.sp,
+            color = Slate700
+          )
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Slate100,
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text(
+              text = msg,
+              modifier = Modifier.padding(10.dp),
+              fontSize = 11.sp,
+              color = Slate800
+            )
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val uri = Uri.parse("https://api.whatsapp.com/send?text=${Uri.encode(msg)}")
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+            try {
+              context.startActivity(intent)
+            } catch (_: Exception) {}
+            notifConfirmationSession = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
+        ) {
+          Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Broadcast on WhatsApp")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { notifConfirmationSession = null }) { Text("Close") }
       }
     )
   }

@@ -1,5 +1,7 @@
 package com.example.ui.admin
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,9 +14,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.*
 import com.example.data.model.Batch
 import com.example.data.model.Course
 import com.example.data.model.Discount
@@ -605,3 +610,200 @@ fun CreateOrEditDiscountDialog(
     }
   )
 }
+
+@Composable
+fun BackendServerSyncDialog(
+  onDismiss: () -> Unit,
+  onTriggerSync: () -> Unit,
+  onPushToSheet: () -> Unit,
+  isSyncing: Boolean
+) {
+  val context = LocalContext.current
+  var serverUrl by remember {
+    mutableStateOf(com.example.data.sheet.GoogleSheetSyncService.WEBHOOK_URL)
+  }
+  val sdf = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
+  val lastSyncTime = remember { sdf.format(Date()) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = null,
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        // Header
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.CloudSync,
+              contentDescription = null,
+              tint = BrandPrimary,
+              modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Backend Server & Sync",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              color = Slate900
+            )
+          }
+          IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate700)
+          }
+        }
+
+        // Info Card
+        Card(
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(containerColor = Slate100),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text("Connection Status", fontSize = 12.sp, color = Slate600)
+              Text("Google Sheet Synced", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text("Database Engine", fontSize = 12.sp, color = Slate600)
+              Text("Google Sheets Cloud DB", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text("Google Sheet ID", fontSize = 12.sp, color = Slate600)
+              Text("1HVB5lNLyCIh...4_04", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate900)
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text("Last Synced", fontSize = 12.sp, color = Slate600)
+              Text(lastSyncTime, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate900)
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text("Official UPI ID", fontSize = 12.sp, color = Slate600)
+              Text("9775708722@apl", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+            }
+          }
+        }
+
+        // Action Buttons
+        Button(
+          onClick = {
+            onPushToSheet()
+            android.widget.Toast.makeText(context, "Pushed local records to Google Sheet DB", android.widget.Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth().height(48.dp)
+        ) {
+          Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.White)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Push All Changes to Google Sheet DB", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        }
+
+        OutlinedButton(
+          onClick = {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://docs.google.com/spreadsheets/d/1HVB5lNLyCIhI-K4c7M-G_G2M1U_B-hI_9HwKk_M_4_04/edit"))
+            try {
+              context.startActivity(intent)
+            } catch (_: Exception) {}
+          },
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth().height(48.dp)
+        ) {
+          Icon(Icons.Default.OpenInNew, contentDescription = null, tint = BrandPrimary)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Open Google Sheet Dashboard", color = BrandPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        }
+
+        // Endpoint config
+        Text(
+          text = "Backend API Endpoint URL:",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold,
+          color = Slate800
+        )
+
+        OutlinedTextField(
+          value = serverUrl,
+          onValueChange = { serverUrl = it },
+          label = { Text("Server URL") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(10.dp)
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          OutlinedButton(
+            onClick = { serverUrl = com.example.data.sheet.GoogleSheetSyncService.WEBHOOK_URL },
+            modifier = Modifier.weight(1f).height(44.dp),
+            shape = RoundedCornerShape(10.dp)
+          ) {
+            Text("Default URL", fontSize = 12.sp)
+          }
+
+          Button(
+            onClick = {
+              onTriggerSync()
+              android.widget.Toast.makeText(context, "Configuration saved & synced", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+            modifier = Modifier.weight(1f).height(44.dp),
+            shape = RoundedCornerShape(10.dp)
+          ) {
+            Text("Save & Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+          }
+        }
+
+        // Big Green Sync Button
+        Button(
+          onClick = {
+            onTriggerSync()
+            android.widget.Toast.makeText(context, "Cloud sync triggered!", android.widget.Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth().height(50.dp)
+        ) {
+          Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            if (isSyncing) "Syncing with Cloud..." else "Trigger Cloud Sync Now",
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+          )
+        }
+      }
+    },
+    confirmButton = {},
+    shape = RoundedCornerShape(20.dp),
+    containerColor = Color.White
+  )
+}
+

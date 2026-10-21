@@ -80,6 +80,20 @@ class PathsalaRepository private constructor(context: Context) {
   private val _lastSyncError = MutableStateFlow<String?>(null)
   val lastSyncError: StateFlow<String?> = _lastSyncError.asStateFlow()
 
+  private val _isDarkMode = MutableStateFlow(localStore.isDarkMode())
+  val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+  fun toggleDarkMode() {
+    val newMode = !_isDarkMode.value
+    _isDarkMode.value = newMode
+    localStore.setDarkMode(newMode)
+  }
+
+  fun setDarkMode(enabled: Boolean) {
+    _isDarkMode.value = enabled
+    localStore.setDarkMode(enabled)
+  }
+
   init {
     // Initial fetch from Google Sheet backend
     refreshData()
@@ -553,7 +567,12 @@ class PathsalaRepository private constructor(context: Context) {
   }
 
   fun updateLiveClass(session: LiveClassSession) {
-    val updated = _liveClasses.value.map { if (it.id == session.id) session else it }
+    val existing = _liveClasses.value.firstOrNull { it.id == session.id }
+    val updated = if (existing != null) {
+      _liveClasses.value.map { if (it.id == session.id) session else it }
+    } else {
+      _liveClasses.value + session
+    }
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
     scope.launch {
@@ -565,6 +584,26 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _liveClasses.value.filterNot { it.id == sessionId }
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
+  }
+
+  fun togglePostponeClass(sessionId: String, isPostponed: Boolean, reason: String? = null) {
+    val existing = _liveClasses.value.firstOrNull { it.id == sessionId }
+    if (existing != null) {
+      val updatedSession = existing.copy(
+        isPostponed = isPostponed,
+        status = if (isPostponed) "postponed" else "scheduled",
+        postponeReason = if (isPostponed) (reason ?: "Class postponed by faculty") else null
+      )
+      updateLiveClass(updatedSession)
+    }
+  }
+
+  fun markClassNotificationSent(sessionId: String) {
+    val existing = _liveClasses.value.firstOrNull { it.id == sessionId }
+    if (existing != null) {
+      val updatedSession = existing.copy(notificationSent = true)
+      updateLiveClass(updatedSession)
+    }
   }
 
   // --- STUDY MATERIALS / NOTES CRUD ---

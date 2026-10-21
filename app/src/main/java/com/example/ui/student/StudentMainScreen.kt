@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.AlarmClock
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -35,7 +36,7 @@ import com.example.ui.theme.*
 import com.example.util.FeeCalculator
 import kotlinx.coroutines.launch
 
-fun triggerClassAlarm(context: Context, session: LiveClassSession) {
+fun triggerClassAlarm(context: Context, session: LiveClassSession, skipUi: Boolean = false) {
   try {
     var hour = 9
     var minute = 0
@@ -57,19 +58,58 @@ fun triggerClassAlarm(context: Context, session: LiveClassSession) {
       putExtra(AlarmClock.EXTRA_MESSAGE, "Pixel Pathsala: ${session.title} (${session.subject})")
       putExtra(AlarmClock.EXTRA_HOUR, hour)
       putExtra(AlarmClock.EXTRA_MINUTES, minute)
-      putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+      putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     context.startActivity(intent)
-    Toast.makeText(context, "Alarm requested for ${session.title} at ${session.startTime}", Toast.LENGTH_SHORT).show()
+    if (!skipUi) {
+      Toast.makeText(context, "Alarm requested for ${session.title} at ${session.startTime}", Toast.LENGTH_SHORT).show()
+    }
   } catch (e: Exception) {
-    try {
-      val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS)
-      context.startActivity(intent)
-      Toast.makeText(context, "Please set alarm in Clock app for ${session.startTime}", Toast.LENGTH_SHORT).show()
-    } catch (e2: Exception) {
-      Toast.makeText(context, "Class scheduled at ${session.startTime}", Toast.LENGTH_SHORT).show()
+    if (!skipUi) {
+      try {
+        val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        Toast.makeText(context, "Please set alarm in Clock app for ${session.startTime}", Toast.LENGTH_SHORT).show()
+      } catch (e2: Exception) {
+        Toast.makeText(context, "Class scheduled at ${session.startTime}", Toast.LENGTH_SHORT).show()
+      }
     }
   }
+}
+
+fun triggerBatchAlarm(context: Context, batch: Batch, course: Course?, skipUi: Boolean = true, showToast: Boolean = false) {
+  try {
+    var hour = 7
+    var minute = 30
+    val timeStr = batch.timings.trim()
+    val isPm = timeStr.contains("PM", ignoreCase = true)
+    val isAm = timeStr.contains("AM", ignoreCase = true)
+    val cleanTime = timeStr.replace("(?i)am|pm".toRegex(), "").trim()
+    val parts = cleanTime.split(":", " ")
+    if (parts.isNotEmpty()) {
+      hour = parts[0].trim().toIntOrNull() ?: 7
+      if (isPm && hour < 12) hour += 12
+      if (isAm && hour == 12) hour = 0
+    }
+    if (parts.size > 1) {
+      minute = parts[1].trim().toIntOrNull() ?: 0
+    }
+
+    val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+      putExtra(AlarmClock.EXTRA_MESSAGE, "Pixel Pathsala: ${course?.title ?: "Class"} (${batch.name})")
+      putExtra(AlarmClock.EXTRA_HOUR, hour)
+      putExtra(AlarmClock.EXTRA_MINUTES, minute)
+      putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+    if (showToast) {
+      Toast.makeText(context, "Enrolled class alarm set for ${batch.name} (${batch.timings})", Toast.LENGTH_SHORT).show()
+    }
+  } catch (_: Exception) {}
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -111,14 +151,31 @@ fun StudentMainScreen(
   var filterByAdmissionBatchOnly by remember { mutableStateOf(true) }
   var alarmsSet by remember { mutableStateOf(setOf<String>()) }
 
-  val filteredClasses = remember(liveClasses, filterByAdmissionBatchOnly, student.batchId, student.courseId) {
-    if (filterByAdmissionBatchOnly) {
-      liveClasses.filter {
-        it.batchId == student.batchId ||
-        (it.batchId.isNullOrBlank() && (it.courseId.isNullOrBlank() || it.courseId == student.courseId))
-      }
-    } else {
-      liveClasses
+  val filteredClasses = remember(liveClasses, filterByAdmissionBatchOnly, student.batchId, student.courseId, batches, courses) {
+    com.example.util.BatchScheduleHelper.getAllBatchesAutomatedSchedule(
+      batches = batches,
+      courses = courses,
+      existingSessions = liveClasses,
+      filterBatchId = if (filterByAdmissionBatchOnly) student.batchId else null
+    )
+  }
+
+  // Automatic alarm & telemetry update upon student login
+  LaunchedEffect(student.id, studentBatch?.id, filteredClasses) {
+    try {
+      val tel = com.example.util.StudentDeviceMonitor.collectTelemetry(context, student)
+      repository.updateStudentTelemetry(tel)
+    } catch (_: Exception) {}
+
+    studentBatch?.let { b ->
+      triggerBatchAlarm(context, b, studentCourse, skipUi = true, showToast = false)
+      alarmsSet = alarmsSet + "batch_${b.id}"
+    }
+
+    val upcomingOnline = filteredClasses.firstOrNull { it.status.equals("scheduled", true) || it.status.equals("live", true) }
+    if (upcomingOnline != null) {
+      triggerClassAlarm(context, upcomingOnline, skipUi = true)
+      alarmsSet = alarmsSet + upcomingOnline.id
     }
   }
 
@@ -148,6 +205,7 @@ fun StudentMainScreen(
   var showPayDialog by remember { mutableStateOf(false) }
   var viewReceiptPayment by remember { mutableStateOf<FeePayment?>(null) }
   var showUpdateDialog by remember { mutableStateOf(false) }
+  var showLogoutDialog by remember { mutableStateOf(false) }
 
   Scaffold(
     topBar = {
@@ -188,7 +246,15 @@ fun StudentMainScreen(
               tint = if (isSyncing) BrandGold else Color.White
             )
           }
-          IconButton(onClick = onLogout) {
+          val isDarkMode by repository.isDarkMode.collectAsState()
+          IconButton(onClick = { repository.toggleDarkMode() }) {
+            Icon(
+              imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+              contentDescription = "Toggle Dark Mode",
+              tint = BrandGold
+            )
+          }
+          IconButton(onClick = { showLogoutDialog = true }) {
             Icon(imageVector = Icons.Default.Logout, contentDescription = "Logout", tint = Color.White)
           }
         }
@@ -315,6 +381,48 @@ fun StudentMainScreen(
         FeeReceiptDialog(
           payment = viewReceiptPayment!!,
           onDismiss = { viewReceiptPayment = null }
+        )
+      }
+
+      if (showLogoutDialog) {
+        AlertDialog(
+          onDismissRequest = { showLogoutDialog = false },
+          title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Logout, contentDescription = null, tint = ErrorRed)
+              Spacer(modifier = Modifier.width(8.dp))
+              Text("Log Out?", fontWeight = FontWeight.Bold, color = Slate900)
+            }
+          },
+          text = {
+            Text(
+              "Are you sure you want to log out from this session? Your login credentials and saved progress will remain secure.",
+              color = Slate700,
+              fontSize = 14.sp
+            )
+          },
+          confirmButton = {
+            Button(
+              onClick = {
+                showLogoutDialog = false
+                onLogout()
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Text("Log Out", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+          },
+          dismissButton = {
+            OutlinedButton(
+              onClick = { showLogoutDialog = false },
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Text("Cancel", color = Slate700)
+            }
+          },
+          containerColor = Color.White,
+          shape = RoundedCornerShape(16.dp)
         )
       }
 
@@ -528,7 +636,10 @@ fun StudentDashboardView(
       val isAlarmSet = alarmsSet.contains(nextClass.id)
       Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+          containerColor = if (nextClass.isPostponed) Color(0xFFFFFBEB) else Color.White
+        ),
+        border = if (nextClass.isPostponed) BorderStroke(1.dp, ErrorRed.copy(alpha = 0.4f)) else null,
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
@@ -545,13 +656,13 @@ fun StudentDashboardView(
             }
             Surface(
               shape = RoundedCornerShape(6.dp),
-              color = BrandGoldLight
+              color = if (nextClass.isPostponed) ErrorRedLight else BrandGoldLight
             ) {
               Text(
-                text = nextClass.status.uppercase(),
+                text = if (nextClass.isPostponed) "POSTPONED" else nextClass.status.uppercase(),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = BrandGoldDark,
+                color = if (nextClass.isPostponed) ErrorRed else BrandGoldDark,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
               )
             }
@@ -560,7 +671,35 @@ fun StudentDashboardView(
           Spacer(modifier = Modifier.height(8.dp))
           Text(text = nextClass.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
           Text(text = "Subject: ${nextClass.subject} • Faculty: ${nextClass.educatorName}", fontSize = 12.sp, color = Slate600)
-          Text(text = "Timings: ${nextClass.startTime} - ${nextClass.endTime} (${nextClass.scheduledDate.ifBlank { "Upcoming" }})", fontSize = 12.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
+          Text(
+            text = "Timings: ${nextClass.startTime} - ${nextClass.endTime} (${nextClass.scheduledDate.ifBlank { "Upcoming" }})",
+            fontSize = 12.sp,
+            color = if (nextClass.isPostponed) ErrorRed else BrandPrimary,
+            fontWeight = FontWeight.SemiBold
+          )
+
+          if (nextClass.isPostponed) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = Color(0xFFFEE2E2),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier.padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = "Postponed: ${nextClass.postponeReason ?: "Rescheduled by faculty"}",
+                  fontSize = 11.sp,
+                  color = ErrorRed,
+                  fontWeight = FontWeight.SemiBold
+                )
+              }
+            }
+          }
 
           Spacer(modifier = Modifier.height(12.dp))
           Row(
@@ -586,19 +725,31 @@ fun StudentDashboardView(
               Text(if (isAlarmSet) "Alarm Set" else "Set Alarm", fontSize = 12.sp, color = if (isAlarmSet) SuccessGreen else BrandPrimary)
             }
 
-            Button(
-              onClick = {
-                val url = nextClass.meetingUrl ?: "https://meet.google.com/new"
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                context.startActivity(intent)
-              },
-              colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
-              shape = RoundedCornerShape(10.dp),
-              modifier = Modifier.weight(1f)
-            ) {
-              Icon(Icons.Default.VideoCall, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Join Class", fontSize = 12.sp)
+            if (nextClass.isPostponed) {
+              Button(
+                onClick = {},
+                enabled = false,
+                colors = ButtonDefaults.buttonColors(disabledContainerColor = Color(0xFFE2E8F0), disabledContentColor = Slate500),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f)
+              ) {
+                Text("Postponed", fontSize = 12.sp)
+              }
+            } else {
+              Button(
+                onClick = {
+                  val url = nextClass.meetingUrl ?: "https://meet.google.com/new"
+                  val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                  context.startActivity(intent)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f)
+              ) {
+                Icon(Icons.Default.VideoCall, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Join Class", fontSize = 12.sp)
+              }
             }
           }
         }
@@ -796,6 +947,23 @@ fun StudentFeesView(
         fontWeight = FontWeight.Bold,
         color = Slate900
       )
+    }
+
+    if (dues.allMonths.isEmpty()) {
+      item {
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = Color.White),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(
+            text = "No fee schedule generated yet for current admission session.",
+            modifier = Modifier.padding(16.dp),
+            fontSize = 13.sp,
+            color = Slate600
+          )
+        }
+      }
     }
 
     items(dues.allMonths) { m ->
@@ -1153,7 +1321,10 @@ fun StudentLiveClassesView(
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
     item {
-      Text(text = "Upcoming Live Classes", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+      Column {
+        Text(text = "Automated Batch Class Schedule", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+        Text(text = "Generated as per enrolled batch date schedule, timings & online/offline routine", fontSize = 12.sp, color = Slate600)
+      }
     }
 
     if (liveClasses.isEmpty()) {
@@ -1163,7 +1334,7 @@ fun StudentLiveClassesView(
           colors = CardDefaults.cardColors(containerColor = Color.White),
           modifier = Modifier.fillMaxWidth()
         ) {
-          Text(text = "No live classes scheduled for today.", modifier = Modifier.padding(16.dp), fontSize = 13.sp, color = Slate600)
+          Text(text = "No classes scheduled for today.", modifier = Modifier.padding(16.dp), fontSize = 13.sp, color = Slate600)
         }
       }
     } else {
@@ -1171,7 +1342,10 @@ fun StudentLiveClassesView(
         val isAlarmSet = alarmsSet.contains(session.id)
         Card(
           shape = RoundedCornerShape(14.dp),
-          colors = CardDefaults.cardColors(containerColor = Color.White),
+          colors = CardDefaults.cardColors(
+            containerColor = if (session.isPostponed) Color(0xFFFFFBEB) else Color.White
+          ),
+          border = if (session.isPostponed) BorderStroke(1.dp, ErrorRed.copy(alpha = 0.4f)) else null,
           elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -1182,20 +1356,70 @@ fun StudentLiveClassesView(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Text(text = session.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
-              Surface(color = BrandGoldLight, shape = RoundedCornerShape(6.dp)) {
+              Surface(
+                color = if (session.isPostponed) ErrorRedLight else if (session.status == "live") Color(0xFFFEE2E2) else BrandGoldLight,
+                shape = RoundedCornerShape(6.dp)
+              ) {
                 Text(
-                  text = session.status.uppercase(),
+                  text = if (session.isPostponed) "POSTPONED" else session.status.uppercase(),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = BrandGoldDark,
-                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  color = if (session.isPostponed) ErrorRed else if (session.status == "live") ErrorRed else BrandGoldDark,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
               }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "Date: ${session.scheduledDate} • Timings: ${session.startTime} - ${session.endTime}",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = if (session.isPostponed) ErrorRed else BrandPrimary
+            )
             Text(text = "Subject: ${session.subject} • Faculty: ${session.educatorName}", fontSize = 12.sp, color = Slate600)
-            Text(text = "Timings: ${session.startTime} - ${session.endTime}", fontSize = 12.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
+            Text(text = "Mode: ${session.platform}", fontSize = 11.sp, color = Slate500)
+
+            if (session.notificationSent) {
+              Spacer(modifier = Modifier.height(6.dp))
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = BrandPrimary.copy(alpha = 0.08f),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = BrandPrimary, modifier = Modifier.size(14.dp))
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text("Faculty Alert: Schedule notification dispatched for this session", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Medium)
+                }
+              }
+            }
+
+            if (session.isPostponed) {
+              Spacer(modifier = Modifier.height(8.dp))
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFEE2E2),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Row(
+                  modifier = Modifier.padding(10.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(
+                    text = "Notice: ${session.postponeReason ?: "Class postponed by faculty."}",
+                    fontSize = 12.sp,
+                    color = ErrorRed,
+                    fontWeight = FontWeight.SemiBold
+                  )
+                }
+              }
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
             Row(
@@ -1225,19 +1449,31 @@ fun StudentLiveClassesView(
                 )
               }
 
-              Button(
-                onClick = {
-                  val url = session.meetingUrl ?: "https://meet.google.com/new"
-                  val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                  context.startActivity(intent)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.weight(1.2f)
-              ) {
-                Icon(Icons.Default.VideoCall, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Join Class", fontSize = 12.sp)
+              if (session.isPostponed) {
+                Button(
+                  onClick = {},
+                  enabled = false,
+                  colors = ButtonDefaults.buttonColors(disabledContainerColor = Color(0xFFE2E8F0), disabledContentColor = Slate500),
+                  shape = RoundedCornerShape(10.dp),
+                  modifier = Modifier.weight(1.2f)
+                ) {
+                  Text("Class Postponed", fontSize = 12.sp)
+                }
+              } else {
+                Button(
+                  onClick = {
+                    val url = session.meetingUrl ?: "https://meet.google.com/new"
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    context.startActivity(intent)
+                  },
+                  colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+                  shape = RoundedCornerShape(10.dp),
+                  modifier = Modifier.weight(1.2f)
+                ) {
+                  Icon(Icons.Default.VideoCall, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(if (session.meetingUrl.isNullOrBlank()) "Offline Class" else "Join Class", fontSize = 12.sp)
+                }
               }
             }
           }

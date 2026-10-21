@@ -154,9 +154,12 @@ data class LiveClassSession(
   val scheduledDate: String = "",
   val startTime: String = "10:00 AM",
   val endTime: String = "12:00 PM",
-  val status: String = "scheduled", // scheduled, live, completed
+  val status: String = "scheduled", // scheduled, live, completed, postponed
   val platform: String = "Google Meet",
-  val meetingUrl: String? = "https://meet.google.com/new"
+  val meetingUrl: String? = "https://meet.google.com/new",
+  val isPostponed: Boolean = false,
+  val postponeReason: String? = null,
+  val notificationSent: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)

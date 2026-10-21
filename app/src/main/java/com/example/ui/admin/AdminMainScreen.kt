@@ -2,8 +2,10 @@ package com.example.ui.admin
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -60,6 +62,7 @@ fun AdminMainScreen(
   var showNewAdmissionDialog by remember { mutableStateOf(false) }
   var rejectingPayment by remember { mutableStateOf<FeePayment?>(null) }
   var showUpdateDialog by remember { mutableStateOf(false) }
+  var showLogoutDialog by remember { mutableStateOf(false) }
 
   var editingStudent by remember { mutableStateOf<Student?>(null) }
   var deletingStudentId by remember { mutableStateOf<String?>(null) }
@@ -107,7 +110,15 @@ fun AdminMainScreen(
               tint = if (isSyncing) BrandGold else Color.White
             )
           }
-          IconButton(onClick = onLogout) {
+          val isDarkMode by repository.isDarkMode.collectAsState()
+          IconButton(onClick = { repository.toggleDarkMode() }) {
+            Icon(
+              imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+              contentDescription = "Toggle Dark Mode",
+              tint = BrandGold
+            )
+          }
+          IconButton(onClick = { showLogoutDialog = true }) {
             Icon(imageVector = Icons.Default.Logout, contentDescription = "Logout", tint = Color.White)
           }
         }
@@ -242,6 +253,12 @@ fun AdminMainScreen(
           },
           onDeleteNote = { id ->
             repository.deleteStudyMaterial(id)
+          },
+          onTogglePostpone = { sessionId, isPostponed, reason ->
+            repository.togglePostponeClass(sessionId, isPostponed, reason)
+          },
+          onSendNotification = { session ->
+            repository.markClassNotificationSent(session.id)
           }
         )
         3 -> AdminAdmissionsTab(
@@ -362,6 +379,48 @@ fun AdminMainScreen(
           dismissButton = {
             TextButton(onClick = { deletingAdmissionId = null }) { Text("Cancel") }
           }
+        )
+      }
+
+      if (showLogoutDialog) {
+        AlertDialog(
+          onDismissRequest = { showLogoutDialog = false },
+          title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Logout, contentDescription = null, tint = ErrorRed)
+              Spacer(modifier = Modifier.width(8.dp))
+              Text("Log Out?", fontWeight = FontWeight.Bold, color = Slate900)
+            }
+          },
+          text = {
+            Text(
+              "Are you sure you want to log out from this session? Your login credentials and saved progress will remain secure.",
+              color = Slate700,
+              fontSize = 14.sp
+            )
+          },
+          confirmButton = {
+            Button(
+              onClick = {
+                showLogoutDialog = false
+                onLogout()
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Text("Log Out", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+          },
+          dismissButton = {
+            OutlinedButton(
+              onClick = { showLogoutDialog = false },
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Text("Cancel", color = Slate700)
+            }
+          },
+          containerColor = Color.White,
+          shape = RoundedCornerShape(16.dp)
         )
       }
 
@@ -732,6 +791,12 @@ fun AdminFeeDeskTab(
   var remarks by remember { mutableStateOf("") }
   var messageText by remember { mutableStateOf<String?>(null) }
 
+  LaunchedEffect(students) {
+    if (selectedStudent == null && students.isNotEmpty()) {
+      selectedStudent = students.first()
+    }
+  }
+
   val pendingPayments = remember(payments) {
     payments.filter { it.status.equals("pending", ignoreCase = true) }
   }
@@ -908,10 +973,12 @@ fun AdminFeeDeskTab(
           Spacer(modifier = Modifier.height(8.dp))
 
           Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            filteredStudents.take(4).forEach { st ->
+            filteredStudents.forEach { st ->
               val isSel = st.id == selectedStudent?.id
               FilterChip(
                 selected = isSel,
@@ -919,6 +986,27 @@ fun AdminFeeDeskTab(
                 label = { Text("${st.name} (${st.rollNo})", fontSize = 12.sp) }
               )
             }
+          }
+        }
+      }
+    }
+
+    if (selectedStudent == null) {
+      item {
+        Card(
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(containerColor = Color.White),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Icon(Icons.Default.PersonSearch, contentDescription = null, tint = BrandPrimary, modifier = Modifier.size(36.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Select a student from the list above to view fee schedule.", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Slate700)
           }
         }
       }
@@ -981,11 +1069,27 @@ fun AdminFeeDeskTab(
               }
             }
 
+            if (studentDues.allMonths.isEmpty()) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Slate100,
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Text(
+                  text = "No fee months found for this student.",
+                  modifier = Modifier.padding(12.dp),
+                  fontSize = 12.sp,
+                  color = Slate600
+                )
+              }
+            }
+
             studentDues.allMonths.forEach { m ->
               val isSelected = m.yearMonth in selectedMonths
               Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = if (m.isPaid) Slate100 else if (isSelected) BrandGoldLight.copy(alpha = 0.5f) else Color.White,
+                color = if (m.isPaid) Slate100 else if (isSelected) BrandGoldLight.copy(alpha = 0.5f) else Color(0xFFF8FAFC),
+                border = BorderStroke(1.dp, if (isSelected) BrandGold else if (m.isPaid) Color(0xFFCBD5E1) else Color(0xFFE2E8F0)),
                 modifier = Modifier
                   .fillMaxWidth()
                   .clip(RoundedCornerShape(8.dp))
@@ -1109,6 +1213,23 @@ fun AdminFeeDeskTab(
     item {
       Spacer(modifier = Modifier.height(12.dp))
       Text(text = "All Fee Transactions (${payments.size})", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+    }
+
+    if (payments.isEmpty()) {
+      item {
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = Color.White),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(
+            text = "No fee receipts or transactions recorded yet.",
+            modifier = Modifier.padding(16.dp),
+            fontSize = 13.sp,
+            color = Slate600
+          )
+        }
+      }
     }
 
     items(payments.reversed()) { p ->

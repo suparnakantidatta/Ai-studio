@@ -151,6 +151,14 @@ class LocalDataStore(context: Context) {
     }
   }
 
+  fun isDarkMode(): Boolean {
+    return prefs.getBoolean("app_dark_mode", false)
+  }
+
+  fun setDarkMode(enabled: Boolean) {
+    prefs.edit().putBoolean("app_dark_mode", enabled).apply()
+  }
+
   fun saveLoggedInAdmin(admin: AdminAccount?) {
     if (admin == null) {
       prefs.edit().remove("logged_in_admin").apply()

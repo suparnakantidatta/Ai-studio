@@ -24,7 +24,8 @@ class MainActivity : ComponentActivity() {
     val repository = PathsalaRepository.getInstance(applicationContext)
 
     setContent {
-      PixelPathsalaTheme {
+      val isDarkMode by repository.isDarkMode.collectAsState()
+      PixelPathsalaTheme(darkTheme = isDarkMode) {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background
@@ -39,7 +40,8 @@ class MainActivity : ComponentActivity() {
             )
           } else if (currentStudent != null) {
             BackHandler {
-              repository.logoutStudent()
+              // Keep login persistent on back press, do not logout!
+              moveTaskToBack(true)
             }
             StudentMainScreen(
               student = currentStudent!!,
@@ -48,7 +50,8 @@ class MainActivity : ComponentActivity() {
             )
           } else if (currentAdmin != null) {
             BackHandler {
-              repository.logoutAdmin()
+              // Keep login persistent on back press, do not logout!
+              moveTaskToBack(true)
             }
             AdminMainScreen(
               admin = currentAdmin!!,
