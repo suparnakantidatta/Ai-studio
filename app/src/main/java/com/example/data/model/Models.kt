@@ -267,6 +267,18 @@ data class Expense(
 )
 
 @JsonClass(generateAdapter = true)
+data class FeeReminderNotification(
+  val id: String,
+  val studentId: String,
+  val studentName: String,
+  val dueAmount: Double,
+  val pendingMonths: String,
+  val message: String,
+  val timestamp: String,
+  val isRead: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
 data class DatabaseDataDto(
   val centerInfo: CenterInfo? = null,
   val students: List<Student>? = null,

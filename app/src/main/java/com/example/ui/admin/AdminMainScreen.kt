@@ -2,6 +2,7 @@ package com.example.ui.admin
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,6 +47,7 @@ fun AdminMainScreen(
   val coroutineScope = rememberCoroutineScope()
 
   val students by repository.students.collectAsState()
+  val context = LocalContext.current
   val courses by repository.courses.collectAsState()
   val batches by repository.batches.collectAsState()
   val payments by repository.payments.collectAsState()
@@ -229,7 +231,17 @@ fun AdminMainScreen(
             rejectingPayment = payment
           },
           onOpenDiscountDialog = { showManageDiscountsDialog = true },
-          onViewReceipt = { viewReceiptPayment = it }
+          onViewReceipt = { viewReceiptPayment = it },
+          onSendReminder = { student, dueAmount, pendingMonths, customMsg ->
+            repository.sendFeeDueReminder(
+              context = context,
+              studentId = student.id,
+              studentName = student.name,
+              dueAmount = dueAmount,
+              pendingMonths = pendingMonths,
+              customMessage = customMsg
+            )
+          }
         )
         2 -> AdminAcademicTab(
           liveClasses = liveClasses,
@@ -782,14 +794,18 @@ fun AdminFeeDeskTab(
   onApprovePayment: (paymentId: String) -> Unit,
   onRejectPayment: (FeePayment) -> Unit,
   onOpenDiscountDialog: () -> Unit,
-  onViewReceipt: (FeePayment) -> Unit
+  onViewReceipt: (FeePayment) -> Unit,
+  onSendReminder: (student: Student, dueAmount: Double, pendingMonths: String, message: String?) -> Unit = { _, _, _, _ -> }
 ) {
+  val context = LocalContext.current
   var selectedStudent by remember { mutableStateOf<Student?>(students.firstOrNull()) }
   var searchQuery by remember { mutableStateOf("") }
   var paymentMode by remember { mutableStateOf("CASH") }
   var transactionRef by remember { mutableStateOf("") }
   var remarks by remember { mutableStateOf("") }
   var messageText by remember { mutableStateOf<String?>(null) }
+  var showSendReminderDialog by remember { mutableStateOf(false) }
+  var feeSubTab by remember { mutableIntStateOf(0) } // 0: Collection Desk, 1: Ledger & Dues
 
   LaunchedEffect(students) {
     if (selectedStudent == null && students.isNotEmpty()) {
@@ -846,12 +862,61 @@ fun AdminFeeDeskTab(
       ?.sumOf { it.discountAmount } ?: 0.0
   }
 
-  LazyColumn(
-    modifier = Modifier
-      .fillMaxSize()
-      .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(16.dp)
-  ) {
+  Column(modifier = Modifier.fillMaxSize()) {
+    TabRow(
+      selectedTabIndex = feeSubTab,
+      containerColor = Color.White,
+      contentColor = BrandPrimary
+    ) {
+      Tab(
+        selected = feeSubTab == 0,
+        onClick = { feeSubTab = 0 },
+        text = {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Collection Desk", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+          }
+        }
+      )
+      Tab(
+        selected = feeSubTab == 1,
+        onClick = { feeSubTab = 1 },
+        text = {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Ledger & Dues", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+          }
+        }
+      )
+    }
+
+    if (feeSubTab == 1) {
+      AdminFeeLedgerTab(
+        students = students,
+        courses = courses,
+        batches = batches,
+        discounts = discounts,
+        payments = payments,
+        onOpenCollectFeeDialog = { st ->
+          if (st != null) selectedStudent = st
+          feeSubTab = 0
+        },
+        onViewReceipt = onViewReceipt,
+        onDeletePayment = {},
+        onEditStudent = {},
+        onSendReminder = { st, due, months ->
+          onSendReminder(st, due, months, null)
+        }
+      )
+    } else {
+      LazyColumn(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+      ) {
     // Header & Manage Discounts
     item {
       Row(
@@ -1032,17 +1097,33 @@ fun AdminFeeDeskTab(
                 Text(text = "Course: ${studentDues.courseTitle} • Batch: ${studentDues.batchName}", fontSize = 12.sp, color = Slate600)
                 Text(text = "Monthly Fee: ₹${studentDues.standardMonthlyFee.toInt()} • Adm: ${studentDues.admissionMonth}", fontSize = 12.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
               }
-              Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (studentDues.totalOutstandingDue > 0) ErrorRedLight else SuccessGreenLight
-              ) {
-                Text(
-                  text = if (studentDues.totalOutstandingDue > 0) "DUE: ₹${studentDues.totalOutstandingDue.toInt()}" else "CLEAR",
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = if (studentDues.totalOutstandingDue > 0) ErrorRed else SuccessGreen,
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
+              Column(horizontalAlignment = Alignment.End) {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = if (studentDues.totalOutstandingDue > 0) ErrorRedLight else SuccessGreenLight
+                ) {
+                  Text(
+                    text = if (studentDues.totalOutstandingDue > 0) "DUE: ₹${studentDues.totalOutstandingDue.toInt()}" else "CLEAR",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (studentDues.totalOutstandingDue > 0) ErrorRed else SuccessGreen,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                  )
+                }
+
+                if (studentDues.totalOutstandingDue > 0) {
+                  Spacer(modifier = Modifier.height(6.dp))
+                  Button(
+                    onClick = { showSendReminderDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                  ) {
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Remind Fee", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
               }
             }
 
@@ -1261,6 +1342,83 @@ fun AdminFeeDeskTab(
       }
     }
   }
+}
+}
+
+  if (showSendReminderDialog && selectedStudent != null && studentDues != null) {
+    SendFeeReminderDialog(
+      student = selectedStudent!!,
+      dueAmount = studentDues.totalOutstandingDue,
+      pendingMonths = studentDues.pendingMonths.joinToString { it.monthLabel },
+      onDismiss = { showSendReminderDialog = false },
+      onConfirmSend = { customMsg ->
+        onSendReminder(
+          selectedStudent!!,
+          studentDues.totalOutstandingDue,
+          studentDues.pendingMonths.joinToString { it.monthLabel },
+          customMsg
+        )
+        Toast.makeText(context, "Fee reminder notification sent to ${selectedStudent!!.name}!", Toast.LENGTH_SHORT).show()
+        showSendReminderDialog = false
+      }
+    )
+  }
+}
+
+@Composable
+fun SendFeeReminderDialog(
+  student: Student,
+  dueAmount: Double,
+  pendingMonths: String,
+  onDismiss: () -> Unit,
+  onConfirmSend: (message: String) -> Unit
+) {
+  var message by remember {
+    mutableStateOf("Dear ${student.name}, you have a pending tuition fee of ₹${dueAmount.toInt()} for $pendingMonths. Kindly deposit at the center desk or pay via online UPI to keep your classes active.")
+  }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = ErrorRed)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Send Fee Due Reminder", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+      }
+    },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(shape = RoundedCornerShape(8.dp), color = Slate100, modifier = Modifier.fillMaxWidth()) {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Text(text = "Student: ${student.name} (${student.rollNo})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Slate900)
+            Text(text = "Outstanding Due: ₹${dueAmount.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = ErrorRed)
+            Text(text = "Pending Months: $pendingMonths", fontSize = 11.sp, color = Slate600)
+          }
+        }
+        Text(text = "Notification Message for Student App:", fontSize = 12.sp, color = Slate700, fontWeight = FontWeight.Medium)
+        OutlinedTextField(
+          value = message,
+          onValueChange = { message = it },
+          label = { Text("Reminder Message") },
+          modifier = Modifier.fillMaxWidth(),
+          maxLines = 4
+        )
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = { onConfirmSend(message) },
+        colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+      ) {
+        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(15.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Send App Notification", color = Color.White)
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) { Text("Cancel") }
+    }
+  )
 }
 
 @Composable

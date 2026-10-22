@@ -133,6 +133,17 @@ fun StudentMainScreen(
   val exams by repository.exams.collectAsState()
   val submissions by repository.submissions.collectAsState()
   val isSyncing by repository.isSyncing.collectAsState()
+  val feeReminders by repository.feeReminders.collectAsState()
+
+  val myReminders = remember(feeReminders, student.id) {
+    feeReminders.filter { it.studentId == student.id }
+  }
+  val unreadRemindersCount = remember(myReminders) {
+    myReminders.count { !it.isRead }
+  }
+  val activeReminder = remember(myReminders) {
+    myReminders.firstOrNull { !it.isRead }
+  }
 
   val studentCourse = courses.firstOrNull { it.id == student.courseId }
   val studentBatch = batches.firstOrNull { it.id == student.batchId }
@@ -206,6 +217,7 @@ fun StudentMainScreen(
   var viewReceiptPayment by remember { mutableStateOf<FeePayment?>(null) }
   var showUpdateDialog by remember { mutableStateOf(false) }
   var showLogoutDialog by remember { mutableStateOf(false) }
+  var showRemindersDialog by remember { mutableStateOf(false) }
 
   Scaffold(
     topBar = {
@@ -224,6 +236,23 @@ fun StudentMainScreen(
           containerColor = BrandSecondary
         ),
         actions = {
+          IconButton(onClick = { showRemindersDialog = true }) {
+            BadgedBox(
+              badge = {
+                if (unreadRemindersCount > 0) {
+                  Badge(containerColor = ErrorRed) {
+                    Text("$unreadRemindersCount", fontSize = 9.sp, color = Color.White)
+                  }
+                }
+              }
+            ) {
+              Icon(
+                imageVector = if (unreadRemindersCount > 0) Icons.Default.NotificationsActive else Icons.Default.Notifications,
+                contentDescription = "Fee Reminders",
+                tint = if (unreadRemindersCount > 0) BrandGold else Color.White
+              )
+            }
+          }
           IconButton(onClick = { showUpdateDialog = true }) {
             BadgedBox(
               badge = {
@@ -314,6 +343,10 @@ fun StudentMainScreen(
           course = studentCourse,
           batch = studentBatch,
           dues = duesSummary,
+          activeReminder = activeReminder,
+          onDismissReminder = { reminderId ->
+            repository.markFeeReminderAsRead(reminderId)
+          },
           liveClasses = filteredClasses,
           studyMaterials = filteredMaterials,
           alarmsSet = alarmsSet,
@@ -328,6 +361,10 @@ fun StudentMainScreen(
         1 -> StudentFeesView(
           student = student,
           dues = duesSummary,
+          activeReminder = activeReminder,
+          onDismissReminder = { reminderId ->
+            repository.markFeeReminderAsRead(reminderId)
+          },
           allPayments = payments.filter { it.studentId == student.id },
           onOpenPayDialog = { showPayDialog = true },
           onViewReceipt = { viewReceiptPayment = it }
@@ -431,6 +468,24 @@ fun StudentMainScreen(
           onDismiss = { showUpdateDialog = false }
         )
       }
+
+      if (showRemindersDialog) {
+        StudentFeeRemindersDialog(
+          reminders = myReminders,
+          onDismiss = { showRemindersDialog = false },
+          onPayNow = {
+            selectedTab = 1
+            showPayDialog = true
+          },
+          onMarkRead = { id ->
+            repository.markFeeReminderAsRead(id)
+          },
+          onDismissAll = {
+            repository.dismissAllFeeReminders(student.id)
+            showRemindersDialog = false
+          }
+        )
+      }
     }
   }
 }
@@ -441,6 +496,8 @@ fun StudentDashboardView(
   course: Course?,
   batch: Batch?,
   dues: FeeDuesSummary,
+  activeReminder: FeeReminderNotification? = null,
+  onDismissReminder: (String) -> Unit = {},
   liveClasses: List<LiveClassSession>,
   studyMaterials: List<StudyMaterial>,
   alarmsSet: Set<String>,
@@ -463,6 +520,14 @@ fun StudentDashboardView(
     if (com.example.util.UpdateManager.isUpdateAvailable()) {
       com.example.ui.common.AppUpdateBanner(
         onClick = onOpenUpdateDialog
+      )
+    }
+
+    if (activeReminder != null) {
+      FeeReminderBanner(
+        reminder = activeReminder,
+        onDismiss = { onDismissReminder(activeReminder.id) },
+        onPayNow = onNavigateToFees
       )
     }
 
@@ -879,6 +944,8 @@ fun StudentDashboardView(
 fun StudentFeesView(
   student: Student,
   dues: FeeDuesSummary,
+  activeReminder: FeeReminderNotification? = null,
+  onDismissReminder: (String) -> Unit = {},
   allPayments: List<FeePayment>,
   onOpenPayDialog: () -> Unit,
   onViewReceipt: (FeePayment) -> Unit
@@ -889,6 +956,16 @@ fun StudentFeesView(
       .padding(16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
+    if (activeReminder != null) {
+      item {
+        FeeReminderBanner(
+          reminder = activeReminder,
+          onDismiss = { onDismissReminder(activeReminder.id) },
+          onPayNow = onOpenPayDialog
+        )
+      }
+    }
+
     // Header Balance Card
     item {
       Card(
@@ -2165,3 +2242,253 @@ fun StudentFocusAndGamesView(
     }
   }
 }
+
+@Composable
+fun FeeReminderBanner(
+  reminder: FeeReminderNotification,
+  onDismiss: () -> Unit,
+  onPayNow: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Card(
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
+    border = BorderStroke(1.5.dp, ErrorRed),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    modifier = modifier.fillMaxWidth()
+  ) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Surface(
+            shape = CircleShape,
+            color = ErrorRed,
+            modifier = Modifier.size(32.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Icon(
+                Icons.Default.NotificationsActive,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+              )
+            }
+          }
+          Column {
+            Text(
+              text = "Fee Due Reminder from Center",
+              fontSize = 13.sp,
+              fontWeight = FontWeight.Bold,
+              color = ErrorRed
+            )
+            Text(
+              text = "Amount Due: ₹${reminder.dueAmount.toInt()}",
+              fontSize = 17.sp,
+              fontWeight = FontWeight.ExtraBold,
+              color = Slate900
+            )
+          }
+        }
+
+        IconButton(
+          onClick = onDismiss,
+          modifier = Modifier.size(28.dp)
+        ) {
+          Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Slate500, modifier = Modifier.size(18.dp))
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        text = "Pending Months: ${reminder.pendingMonths}",
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Slate800
+      )
+
+      if (reminder.message.isNotBlank()) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = reminder.message,
+          fontSize = 12.sp,
+          color = Slate600
+        )
+      }
+
+      Spacer(modifier = Modifier.height(12.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        TextButton(
+          onClick = onDismiss,
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+          Text("Dismiss", color = Slate600, fontSize = 12.sp)
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+          onClick = onPayNow,
+          colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+          Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Pay Fees Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun StudentFeeRemindersDialog(
+  reminders: List<FeeReminderNotification>,
+  onDismiss: () -> Unit,
+  onPayNow: () -> Unit,
+  onMarkRead: (String) -> Unit,
+  onDismissAll: () -> Unit
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = ErrorRed)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Fee Reminders (${reminders.size})", fontWeight = FontWeight.Bold, color = Slate900, fontSize = 17.sp)
+      }
+    },
+    text = {
+      if (reminders.isEmpty()) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+          Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(48.dp))
+          Spacer(modifier = Modifier.height(8.dp))
+          Text("No Fee Reminders", fontWeight = FontWeight.Bold, color = Slate800, fontSize = 15.sp)
+          Text("All your tuition fees are up to date. Thank you!", fontSize = 12.sp, color = Slate600, textAlign = TextAlign.Center)
+        }
+      } else {
+        LazyColumn(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 350.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          items(reminders) { reminder ->
+            Surface(
+              shape = RoundedCornerShape(12.dp),
+              color = if (!reminder.isRead) ErrorRedLight else Slate100,
+              border = BorderStroke(1.dp, if (!reminder.isRead) ErrorRed.copy(alpha = 0.5f) else Slate300),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!reminder.isRead) {
+                      Box(
+                        modifier = Modifier
+                          .size(8.dp)
+                          .clip(CircleShape)
+                          .background(ErrorRed)
+                      )
+                      Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text(
+                      text = "Fee Due: ₹${reminder.dueAmount.toInt()}",
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 15.sp,
+                      color = if (!reminder.isRead) ErrorRed else Slate800
+                    )
+                  }
+                  Text(
+                    text = reminder.timestamp.take(10),
+                    fontSize = 10.sp,
+                    color = Slate500
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                  text = "Pending Months: ${reminder.pendingMonths}",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Slate700
+                )
+
+                if (reminder.message.isNotBlank()) {
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text(
+                    text = reminder.message,
+                    fontSize = 12.sp,
+                    color = Slate600
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.End,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  if (!reminder.isRead) {
+                    TextButton(
+                      onClick = { onMarkRead(reminder.id) },
+                      contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                      Text("Mark as Read", fontSize = 11.sp, color = Slate700)
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                  }
+                  Button(
+                    onClick = {
+                      onMarkRead(reminder.id)
+                      onDismiss()
+                      onPayNow()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                  ) {
+                    Text("Pay Now", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      if (reminders.isNotEmpty()) {
+        TextButton(onClick = onDismissAll) {
+          Text("Dismiss All", color = Slate600, fontSize = 12.sp)
+        }
+      }
+    },
+    dismissButton = {
+      OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(8.dp)) {
+        Text("Close", color = Slate800, fontSize = 12.sp)
+      }
+    },
+    containerColor = Color.White,
+    shape = RoundedCornerShape(16.dp)
+  )
+}
+

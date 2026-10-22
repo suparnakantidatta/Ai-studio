@@ -2,6 +2,7 @@ package com.example.ui.admin
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -34,7 +35,8 @@ fun AdminFeeLedgerTab(
   onOpenCollectFeeDialog: (Student?) -> Unit,
   onViewReceipt: (FeePayment) -> Unit,
   onDeletePayment: (String) -> Unit,
-  onEditStudent: (Student) -> Unit
+  onEditStudent: (Student) -> Unit,
+  onSendReminder: (Student, Double, String) -> Unit = { _, _, _ -> }
 ) {
   val context = LocalContext.current
   var selectedSubTab by remember { mutableIntStateOf(0) } // 0: Receipts Ledger, 1: Outstanding Dues
@@ -366,9 +368,13 @@ fun AdminFeeLedgerTab(
           }
         }
 
-        // Filter Buttons matching Screenshot 5
+        // Filter Buttons & Remind All
         item {
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
             Button(
               onClick = { duesFilterOnlyWithDues = true },
               colors = ButtonDefaults.buttonColors(
@@ -390,7 +396,29 @@ fun AdminFeeLedgerTab(
               shape = RoundedCornerShape(8.dp),
               contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-              Text("All Admitted Students (${students.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Text("All Admitted (${students.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+
+            if (studentsWithDues.isNotEmpty()) {
+              Button(
+                onClick = {
+                  studentsWithDues.forEach { (s, sDues) ->
+                    onSendReminder(
+                      s,
+                      sDues.totalOutstandingDue,
+                      sDues.pendingMonths.joinToString { it.monthLabel }
+                    )
+                  }
+                  Toast.makeText(context, "Reminders sent to all ${studentsWithDues.size} students!", Toast.LENGTH_SHORT).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+              ) {
+                Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(13.dp))
+                Spacer(modifier = Modifier.width(3.dp))
+                Text("Remind All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              }
             }
           }
         }
@@ -564,6 +592,27 @@ fun AdminFeeLedgerTab(
                   Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
                   Spacer(modifier = Modifier.width(4.dp))
                   Text("Collect Fee", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                if (dues.totalOutstandingDue > 0) {
+                  Button(
+                    onClick = {
+                      onSendReminder(
+                        st,
+                        dues.totalOutstandingDue,
+                        dues.pendingMonths.joinToString { it.monthLabel }
+                      )
+                      Toast.makeText(context, "Fee reminder sent to ${st.name}!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1.0f)
+                  ) {
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Remind", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
                 }
 
                 Button(

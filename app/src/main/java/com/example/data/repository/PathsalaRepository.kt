@@ -68,6 +68,9 @@ class PathsalaRepository private constructor(context: Context) {
   private val _studentTelemetries = MutableStateFlow(localStore.getStudentTelemetries())
   val studentTelemetries: StateFlow<List<StudentTelemetry>> = _studentTelemetries.asStateFlow()
 
+  private val _feeReminders = MutableStateFlow<List<FeeReminderNotification>>(localStore.getFeeReminders())
+  val feeReminders: StateFlow<List<FeeReminderNotification>> = _feeReminders.asStateFlow()
+
   private val _currentStudent = MutableStateFlow(localStore.getLoggedInStudent())
   val currentStudent: StateFlow<Student?> = _currentStudent.asStateFlow()
 
@@ -661,6 +664,59 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _discounts.value.filterNot { it.id == discountId }
     _discounts.value = updated
     localStore.saveDiscounts(updated)
+  }
+
+  // --- FEE DUE REMINDER NOTIFICATIONS ---
+  fun sendFeeDueReminder(
+    context: Context,
+    studentId: String,
+    studentName: String,
+    dueAmount: Double,
+    pendingMonths: String,
+    customMessage: String? = null
+  ) {
+    val msg = customMessage?.trim()?.ifBlank { null }
+      ?: "Dear $studentName, you have a pending tuition fee of ₹${dueAmount.toInt()} for $pendingMonths. Please clear at your earliest convenience to keep your batch enrollment active."
+
+    val timestamp = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.US).format(java.util.Date())
+    val reminder = FeeReminderNotification(
+      id = "rem-${System.currentTimeMillis()}-$studentId",
+      studentId = studentId,
+      studentName = studentName,
+      dueAmount = dueAmount,
+      pendingMonths = pendingMonths,
+      message = msg,
+      timestamp = timestamp,
+      isRead = false
+    )
+
+    val updated = _feeReminders.value.filterNot { it.studentId == studentId } + reminder
+    _feeReminders.value = updated
+    localStore.saveFeeReminders(updated)
+
+    // Trigger Android System Notification
+    com.example.util.NotificationHelper.sendFeeDueSystemNotification(
+      context = context,
+      studentName = studentName,
+      dueAmount = dueAmount,
+      message = msg
+    )
+  }
+
+  fun markFeeReminderAsRead(reminderId: String) {
+    val updated = _feeReminders.value.map {
+      if (it.id == reminderId) it.copy(isRead = true) else it
+    }
+    _feeReminders.value = updated
+    localStore.saveFeeReminders(updated)
+  }
+
+  fun dismissAllFeeReminders(studentId: String) {
+    val updated = _feeReminders.value.map {
+      if (it.studentId == studentId) it.copy(isRead = true) else it
+    }
+    _feeReminders.value = updated
+    localStore.saveFeeReminders(updated)
   }
 
   companion object {

@@ -125,6 +125,9 @@ class LocalDataStore(context: Context) {
   fun getExpenses(): List<Expense> = getList("expenses", emptyList())
   fun saveExpenses(list: List<Expense>) = putList("expenses", list)
 
+  fun getFeeReminders(): List<FeeReminderNotification> = getList("fee_reminders", emptyList())
+  fun saveFeeReminders(list: List<FeeReminderNotification>) = putList("fee_reminders", list)
+
   fun getLoggedInStudent(): Student? {
     val json = prefs.getString("logged_in_student", null) ?: return null
     return try {
