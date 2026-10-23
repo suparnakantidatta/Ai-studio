@@ -49,7 +49,6 @@ fun LoginScreen(
   var adminPassword by remember { mutableStateOf("") }
   var adminPasswordVisible by remember { mutableStateOf(false) }
   var adminError by remember { mutableStateOf<String?>(null) }
-  var showUpdateDialog by remember { mutableStateOf(false) }
 
   val scrollState = rememberScrollState()
 
@@ -63,7 +62,7 @@ fun LoginScreen(
       modifier = Modifier
         .fillMaxWidth()
         .statusBarsPadding()
-        .padding(horizontal = 16.dp, vertical = 8.dp),
+        .padding(horizontal = 16.dp, vertical = 6.dp),
       horizontalArrangement = Arrangement.End,
       verticalAlignment = Alignment.CenterVertically
     ) {
@@ -89,77 +88,18 @@ fun LoginScreen(
         .padding(horizontal = 20.dp),
       horizontalAlignment = Alignment.CenterHorizontally
     ) {
-      Spacer(modifier = Modifier.height(48.dp))
+      Spacer(modifier = Modifier.height(28.dp))
 
-      if (com.example.util.UpdateManager.isUpdateAvailable()) {
-        com.example.ui.common.AppUpdateBanner(
-          onClick = { showUpdateDialog = true },
-          modifier = Modifier.padding(bottom = 16.dp)
-        )
-      }
-
-      // Top Logo Header matching screenshot
-      Surface(
+      // Compact Pixel Pathsala Logo
+      androidx.compose.foundation.Image(
+        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.pixel_logo),
+        contentDescription = "Pixel Pathsala",
         modifier = Modifier
-          .fillMaxWidth()
-          .height(180.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = Color(0xFF030712),
-        border = BorderStroke(1.5.dp, BrandGold.copy(alpha = 0.7f))
-      ) {
-        Box(
-          modifier = Modifier.fillMaxSize(),
-          contentAlignment = Alignment.Center
-        ) {
-          Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-          ) {
-            // Monitor Icon with Gold P
-            Surface(
-              shape = RoundedCornerShape(12.dp),
-              color = Color.Black,
-              border = BorderStroke(1.5.dp, BrandGold),
-              modifier = Modifier.size(68.dp, 50.dp)
-            ) {
-              Box(contentAlignment = Alignment.Center) {
-                Text(
-                  text = "P",
-                  fontSize = 24.sp,
-                  fontWeight = FontWeight.ExtraBold,
-                  color = BrandGold
-                )
-              }
-            }
-            // Stand base
-            Box(
-              modifier = Modifier
-                .width(28.dp)
-                .height(4.dp)
-                .background(BrandGold, RoundedCornerShape(2.dp))
-            )
+          .fillMaxWidth(0.65f)
+          .height(65.dp)
+      )
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-              text = "PIXEL PATHSHALA",
-              fontSize = 17.sp,
-              fontWeight = FontWeight.Bold,
-              color = BrandGold,
-              letterSpacing = 1.5.sp
-            )
-            Text(
-              text = "CODE YOUR DREAM, DECODE THE FUTURE",
-              fontSize = 9.sp,
-              fontWeight = FontWeight.Medium,
-              color = BrandGoldLight.copy(alpha = 0.9f),
-              letterSpacing = 0.8.sp
-            )
-          }
-        }
-      }
-
-      Spacer(modifier = Modifier.height(20.dp))
+      Spacer(modifier = Modifier.height(14.dp))
 
       // Segmented Switcher matching screenshot
       Surface(
@@ -495,26 +435,6 @@ fun LoginScreen(
               Text("Sign In to Student Portal", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
           }
-
-          Spacer(modifier = Modifier.height(20.dp))
-          HorizontalDivider(color = Slate200)
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clickable { showUpdateDialog = true },
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = Slate600, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              text = "Pixel Pathsala v${com.example.util.UpdateManager.CURRENT_VERSION} • Check for Updates",
-              fontSize = 11.sp,
-              color = Slate600
-            )
-          }
         }
       }
 
@@ -528,12 +448,6 @@ fun LoginScreen(
       )
 
       Spacer(modifier = Modifier.height(32.dp))
-    }
-
-    if (showUpdateDialog) {
-      com.example.ui.common.AppUpdateDialog(
-        onDismiss = { showUpdateDialog = false }
-      )
     }
   }
 }

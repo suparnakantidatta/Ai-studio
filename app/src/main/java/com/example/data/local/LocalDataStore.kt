@@ -15,12 +15,12 @@ class LocalDataStore(context: Context) {
     val INITIAL_CENTER = CenterInfo(
       id = "center-1",
       name = "Pixel Pathsala",
-      tagLine = "West Bengal Premier Tuition & Coaching Center",
+      tagLine = "Code your dream, decode the future",
       address = "Raina, Purba Bardhaman, West Bengal",
-      phone = "+91 9475934733",
-      email = "admin@pixelpathsala.com",
-      upiId = "suparnakantidatta@okaxis",
-      upiName = "Pixel Pathsala Admin",
+      phone = "+91 7908457219",
+      email = "pixelpathsala+edu@gmail.com",
+      upiId = "9775708722@apl",
+      upiName = "Pixel Pathsala Center",
       websiteUrl = "https://pixelpathsala.com"
     )
 

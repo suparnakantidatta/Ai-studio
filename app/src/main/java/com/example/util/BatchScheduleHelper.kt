@@ -101,7 +101,8 @@ object BatchScheduleHelper {
     batches: List<Batch>,
     courses: List<Course>,
     existingSessions: List<LiveClassSession>,
-    filterBatchId: String? = null
+    filterBatchId: String? = null,
+    filterCourseId: String? = null
   ): List<LiveClassSession> {
     val targetBatches = if (!filterBatchId.isNullOrBlank()) {
       batches.filter { it.id == filterBatchId }
@@ -118,8 +119,18 @@ object BatchScheduleHelper {
     // Also include any custom one-off live classes from existingSessions
     val autoIds = list.map { it.id }.toSet()
     existingSessions.forEach { custom ->
-      if (!autoIds.contains(custom.id) && (filterBatchId.isNullOrBlank() || custom.batchId == filterBatchId)) {
-        list.add(custom)
+      if (!autoIds.contains(custom.id)) {
+        val matchesBatch = when {
+          filterBatchId.isNullOrBlank() -> true
+          custom.batchId == filterBatchId -> true
+          custom.batchId.equals("all", ignoreCase = true) -> {
+            filterCourseId.isNullOrBlank() || custom.courseId.isNullOrBlank() || custom.courseId == filterCourseId
+          }
+          else -> false
+        }
+        if (matchesBatch) {
+          list.add(custom)
+        }
       }
     }
 

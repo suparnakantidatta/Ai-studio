@@ -7,12 +7,12 @@ import com.squareup.moshi.JsonClass
 data class CenterInfo(
   val id: String = "center-1",
   val name: String = "Pixel Pathsala",
-  val tagLine: String = "West Bengal Premier Tuition & Coaching Center",
+  val tagLine: String = "Code your dream, decode the future",
   val address: String = "Raina, Purba Bardhaman, West Bengal",
-  val phone: String = "+91 9475934733",
-  val email: String = "admin@pixelpathsala.com",
-  val upiId: String = "suparnakantidatta@okaxis",
-  val upiName: String = "Pixel Pathsala Admin",
+  val phone: String = "+91 7908457219",
+  val email: String = "pixelpathsala+edu@gmail.com",
+  val upiId: String = "9775708722@apl",
+  val upiName: String = "Pixel Pathsala Center",
   val qrCodeUrl: String? = null,
   val websiteUrl: String = "https://pixelpathsala.com"
 )

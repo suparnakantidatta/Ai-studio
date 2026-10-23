@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -37,79 +38,11 @@ import com.example.util.FeeCalculator
 import kotlinx.coroutines.launch
 
 fun triggerClassAlarm(context: Context, session: LiveClassSession, skipUi: Boolean = false) {
-  try {
-    var hour = 9
-    var minute = 0
-    val timeStr = session.startTime.trim()
-    val isPm = timeStr.contains("PM", ignoreCase = true)
-    val isAm = timeStr.contains("AM", ignoreCase = true)
-    val cleanTime = timeStr.replace("(?i)am|pm".toRegex(), "").trim()
-    val parts = cleanTime.split(":")
-    if (parts.isNotEmpty()) {
-      hour = parts[0].trim().toIntOrNull() ?: 9
-      if (isPm && hour < 12) hour += 12
-      if (isAm && hour == 12) hour = 0
-    }
-    if (parts.size > 1) {
-      minute = parts[1].trim().toIntOrNull() ?: 0
-    }
-
-    val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
-      putExtra(AlarmClock.EXTRA_MESSAGE, "Pixel Pathsala: ${session.title} (${session.subject})")
-      putExtra(AlarmClock.EXTRA_HOUR, hour)
-      putExtra(AlarmClock.EXTRA_MINUTES, minute)
-      putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    context.startActivity(intent)
-    if (!skipUi) {
-      Toast.makeText(context, "Alarm requested for ${session.title} at ${session.startTime}", Toast.LENGTH_SHORT).show()
-    }
-  } catch (e: Exception) {
-    if (!skipUi) {
-      try {
-        val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS).apply {
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-        Toast.makeText(context, "Please set alarm in Clock app for ${session.startTime}", Toast.LENGTH_SHORT).show()
-      } catch (e2: Exception) {
-        Toast.makeText(context, "Class scheduled at ${session.startTime}", Toast.LENGTH_SHORT).show()
-      }
-    }
-  }
+  com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, session, showToast = !skipUi)
 }
 
 fun triggerBatchAlarm(context: Context, batch: Batch, course: Course?, skipUi: Boolean = true, showToast: Boolean = false) {
-  try {
-    var hour = 7
-    var minute = 30
-    val timeStr = batch.timings.trim()
-    val isPm = timeStr.contains("PM", ignoreCase = true)
-    val isAm = timeStr.contains("AM", ignoreCase = true)
-    val cleanTime = timeStr.replace("(?i)am|pm".toRegex(), "").trim()
-    val parts = cleanTime.split(":", " ")
-    if (parts.isNotEmpty()) {
-      hour = parts[0].trim().toIntOrNull() ?: 7
-      if (isPm && hour < 12) hour += 12
-      if (isAm && hour == 12) hour = 0
-    }
-    if (parts.size > 1) {
-      minute = parts[1].trim().toIntOrNull() ?: 0
-    }
-
-    val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
-      putExtra(AlarmClock.EXTRA_MESSAGE, "Pixel Pathsala: ${course?.title ?: "Class"} (${batch.name})")
-      putExtra(AlarmClock.EXTRA_HOUR, hour)
-      putExtra(AlarmClock.EXTRA_MINUTES, minute)
-      putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    context.startActivity(intent)
-    if (showToast) {
-      Toast.makeText(context, "Enrolled class alarm set for ${batch.name} (${batch.timings})", Toast.LENGTH_SHORT).show()
-    }
-  } catch (_: Exception) {}
+  com.example.util.InAppAlarmScheduler.scheduleBatchAlarm(context, batch, showToast = showToast)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,6 +56,7 @@ fun StudentMainScreen(
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
 
+  val centerInfo by repository.centerInfo.collectAsState()
   val courses by repository.courses.collectAsState()
   val batches by repository.batches.collectAsState()
   val payments by repository.payments.collectAsState()
@@ -158,16 +92,16 @@ fun StudentMainScreen(
     )
   }
 
-  // Batchwise filter state (Default to their admission batch)
-  var filterByAdmissionBatchOnly by remember { mutableStateOf(true) }
   var alarmsSet by remember { mutableStateOf(setOf<String>()) }
 
-  val filteredClasses = remember(liveClasses, filterByAdmissionBatchOnly, student.batchId, student.courseId, batches, courses) {
+  // Strictly filter class schedule for student's admission batch & course
+  val filteredClasses = remember(liveClasses, student.batchId, student.courseId, batches, courses) {
     com.example.util.BatchScheduleHelper.getAllBatchesAutomatedSchedule(
       batches = batches,
       courses = courses,
       existingSessions = liveClasses,
-      filterBatchId = if (filterByAdmissionBatchOnly) student.batchId else null
+      filterBatchId = student.batchId,
+      filterCourseId = student.courseId
     )
   }
 
@@ -190,25 +124,29 @@ fun StudentMainScreen(
     }
   }
 
-  val filteredMaterials = remember(studyMaterials, filterByAdmissionBatchOnly, student.batchId, student.courseId) {
-    if (filterByAdmissionBatchOnly) {
-      studyMaterials.filter {
-        it.batchId == student.batchId ||
-        (it.batchId.isNullOrBlank() && (it.courseId.isNullOrBlank() || it.courseId == student.courseId))
+  // Strictly filter notes (study materials) for student's admission batch & course
+  val filteredMaterials = remember(studyMaterials, student.batchId, student.courseId) {
+    studyMaterials.filter { material ->
+      val matBatch = material.batchId?.trim() ?: ""
+      val matCourse = material.courseId?.trim() ?: ""
+      when {
+        matBatch.isNotEmpty() && !matBatch.equals("all", ignoreCase = true) -> matBatch == student.batchId
+        matBatch.equals("all", ignoreCase = true) -> matCourse.isEmpty() || matCourse == student.courseId
+        else -> matCourse.isEmpty() || matCourse == student.courseId
       }
-    } else {
-      studyMaterials
     }
   }
 
-  val filteredRecordings = remember(recordings, filterByAdmissionBatchOnly, student.batchId, student.courseId) {
-    if (filterByAdmissionBatchOnly) {
-      recordings.filter {
-        it.batchId == student.batchId ||
-        (it.batchId.isNullOrBlank() && (it.courseId.isNullOrBlank() || it.courseId == student.courseId))
+  // Strictly filter live video recordings for student's admission batch & course
+  val filteredRecordings = remember(recordings, student.batchId, student.courseId) {
+    recordings.filter { rec ->
+      val recBatch = rec.batchId?.trim() ?: ""
+      val recCourse = rec.courseId?.trim() ?: ""
+      when {
+        recBatch.isNotEmpty() && !recBatch.equals("all", ignoreCase = true) -> recBatch == student.batchId
+        recBatch.equals("all", ignoreCase = true) -> recCourse.isEmpty() || recCourse == student.courseId
+        else -> recCourse.isEmpty() || recCourse == student.courseId
       }
-    } else {
-      recordings
     }
   }
 
@@ -343,6 +281,7 @@ fun StudentMainScreen(
           course = studentCourse,
           batch = studentBatch,
           dues = duesSummary,
+          centerInfo = centerInfo,
           activeReminder = activeReminder,
           onDismissReminder = { reminderId ->
             repository.markFeeReminderAsRead(reminderId)
@@ -373,8 +312,6 @@ fun StudentMainScreen(
           liveClasses = filteredClasses,
           recordings = filteredRecordings,
           batch = studentBatch,
-          filterByAdmissionBatchOnly = filterByAdmissionBatchOnly,
-          onToggleBatchFilter = { filterByAdmissionBatchOnly = !filterByAdmissionBatchOnly },
           alarmsSet = alarmsSet,
           onToggleAlarm = { id ->
             alarmsSet = if (alarmsSet.contains(id)) alarmsSet - id else alarmsSet + id
@@ -386,9 +323,7 @@ fun StudentMainScreen(
             it.courseId.isNullOrBlank() || it.courseId == student.courseId
           },
           submissions = submissions.filter { it.studentId == student.id },
-          batch = studentBatch,
-          filterByAdmissionBatchOnly = filterByAdmissionBatchOnly,
-          onToggleBatchFilter = { filterByAdmissionBatchOnly = !filterByAdmissionBatchOnly }
+          batch = studentBatch
         )
       }
 
@@ -397,6 +332,7 @@ fun StudentMainScreen(
         StudentPayModal(
           student = student,
           dues = duesSummary,
+          centerInfo = centerInfo,
           onDismiss = { showPayDialog = false },
           onSubmitPayment = { selectedMonths, mode, txRef ->
             coroutineScope.launch {
@@ -496,6 +432,7 @@ fun StudentDashboardView(
   course: Course?,
   batch: Batch?,
   dues: FeeDuesSummary,
+  centerInfo: CenterInfo = CenterInfo(),
   activeReminder: FeeReminderNotification? = null,
   onDismissReminder: (String) -> Unit = {},
   liveClasses: List<LiveClassSession>,
@@ -557,6 +494,83 @@ fun StudentDashboardView(
               fontWeight = FontWeight.Bold,
               color = BrandSecondary,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // EYE-CATCHING BADGES IN ONE LINE
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFFDCFCE7)
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Box(modifier = Modifier.size(6.dp).background(SuccessGreen, CircleShape))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(text = student.status.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+            }
+          }
+
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color.White.copy(alpha = 0.2f)
+          ) {
+            Text(
+              text = "Roll: ${student.rollNo}",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+          }
+
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = BrandGoldLight.copy(alpha = 0.25f)
+          ) {
+            Text(
+              text = student.studentClass ?: course?.academicClass ?: "Class 11",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = BrandGold,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+          }
+
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color.White.copy(alpha = 0.2f)
+          ) {
+            Text(
+              text = (batch?.mode ?: student.mode).uppercase(),
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+          }
+
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (dues.totalOutstandingDue > 0) ErrorRed.copy(alpha = 0.9f) else SuccessGreen
+          ) {
+            Text(
+              text = if (dues.totalOutstandingDue > 0) "DUE: ₹${dues.totalOutstandingDue.toInt()}" else "FEE CLEAR",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
             )
           }
         }
@@ -931,10 +945,10 @@ fun StudentDashboardView(
           Text(text = "Center Information", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Slate900)
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Pixel Pathsala", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Slate800)
-        Text(text = "Raina, Purba Bardhaman, West Bengal", fontSize = 12.sp, color = Slate600)
-        Text(text = "Support / Helpdesk: +91 9475934733", fontSize = 12.sp, color = BrandPrimary)
-        Text(text = "UPI for Fees: suparnakantidatta@okaxis", fontSize = 12.sp, color = BrandGoldDark, fontWeight = FontWeight.Medium)
+        Text(text = centerInfo.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Slate800)
+        Text(text = "${centerInfo.address} • ${centerInfo.tagLine}", fontSize = 12.sp, color = Slate600)
+        Text(text = "Helpline & Office: ${centerInfo.phone}", fontSize = 12.sp, color = BrandPrimary)
+        Text(text = "Official UPI ID: ${centerInfo.upiId} (${centerInfo.upiName})", fontSize = 12.sp, color = BrandGoldDark, fontWeight = FontWeight.Medium)
       }
     }
   }
@@ -1158,6 +1172,7 @@ fun StudentFeesView(
 fun StudentPayModal(
   student: Student,
   dues: FeeDuesSummary,
+  centerInfo: CenterInfo = CenterInfo(),
   onDismiss: () -> Unit,
   onSubmitPayment: (selectedMonths: List<String>, mode: String, txRef: String?) -> Unit
 ) {
@@ -1266,8 +1281,8 @@ fun StudentPayModal(
             modifier = Modifier.fillMaxWidth()
           ) {
             Column(modifier = Modifier.padding(10.dp)) {
-              Text(text = "Center UPI ID: suparnakantidatta@okaxis", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
-              Text(text = "Name: Pixel Pathsala Admin", fontSize = 11.sp, color = Slate600)
+              Text(text = "Center UPI ID: ${centerInfo.upiId}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+              Text(text = "Payee Name: ${centerInfo.upiName}", fontSize = 11.sp, color = Slate600)
               Text(text = "Scan or transfer via GPay/PhonePe/Paytm, then enter the 12-digit UTR/Ref number below:", fontSize = 11.sp, color = Slate800)
             }
           }
@@ -1783,8 +1798,6 @@ fun StudentClassesAndRoutineView(
   liveClasses: List<LiveClassSession>,
   recordings: List<ClassRecording>,
   batch: Batch?,
-  filterByAdmissionBatchOnly: Boolean = true,
-  onToggleBatchFilter: () -> Unit = {},
   alarmsSet: Set<String> = emptySet(),
   onToggleAlarm: (String) -> Unit = {}
 ) {
@@ -1799,7 +1812,7 @@ fun StudentClassesAndRoutineView(
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 6.dp)
+          .padding(horizontal = 16.dp, vertical = 8.dp)
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -1811,7 +1824,7 @@ fun StudentClassesAndRoutineView(
             leadingIcon = {
               Icon(Icons.Default.VideoCall, contentDescription = null, modifier = Modifier.size(16.dp))
             },
-            label = { Text("Classes & Archives", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+            label = { Text("Classes & Archives (${liveClasses.size + recordings.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
             colors = FilterChipDefaults.filterChipColors(
               selectedContainerColor = BrandPrimary,
               selectedLabelColor = Color.White
@@ -1834,29 +1847,45 @@ fun StudentClassesAndRoutineView(
           )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-        FilterChip(
-          selected = filterByAdmissionBatchOnly,
-          onClick = onToggleBatchFilter,
-          leadingIcon = {
+        Spacer(modifier = Modifier.height(6.dp))
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = BrandPrimary.copy(alpha = 0.08f),
+          border = BorderStroke(1.dp, BrandPrimary.copy(alpha = 0.2f)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
             Icon(
-              imageVector = if (filterByAdmissionBatchOnly) Icons.Default.FilterAlt else Icons.Default.FilterAltOff,
+              imageVector = Icons.Default.CheckCircle,
               contentDescription = null,
-              modifier = Modifier.size(14.dp)
+              tint = BrandPrimary,
+              modifier = Modifier.size(16.dp)
             )
-          },
-          label = {
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-              if (filterByAdmissionBatchOnly) "Admission Batch: ${batch?.name ?: "Enrolled"}" else "Showing: All Batches",
+              text = "Enrolled Batch Schedule: ${batch?.name ?: "Admission Batch"}",
               fontSize = 11.sp,
-              fontWeight = FontWeight.SemiBold
+              fontWeight = FontWeight.Bold,
+              color = BrandPrimary
             )
-          },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BrandGoldLight,
-            selectedLabelColor = BrandGoldDark
-          )
-        )
+            Spacer(modifier = Modifier.weight(1f))
+            Surface(
+              shape = RoundedCornerShape(4.dp),
+              color = BrandGoldLight
+            ) {
+              Text(
+                text = batch?.timings ?: "Scheduled",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = BrandGoldDark,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+          }
+        }
       }
     }
 
@@ -1927,9 +1956,7 @@ fun StudentStudyAndExamsView(
   materials: List<StudyMaterial>,
   exams: List<OnlineExam>,
   submissions: List<ExamSubmission>,
-  batch: Batch? = null,
-  filterByAdmissionBatchOnly: Boolean = true,
-  onToggleBatchFilter: () -> Unit = {}
+  batch: Batch? = null
 ) {
   var selectedSubTab by remember { mutableIntStateOf(0) }
 
@@ -1942,7 +1969,7 @@ fun StudentStudyAndExamsView(
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 6.dp)
+          .padding(horizontal = 16.dp, vertical = 8.dp)
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -1954,7 +1981,7 @@ fun StudentStudyAndExamsView(
             leadingIcon = {
               Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
             },
-            label = { Text("Study & Web Portal (${materials.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+            label = { Text("Batch Notes (${materials.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
             colors = FilterChipDefaults.filterChipColors(
               selectedContainerColor = BrandPrimary,
               selectedLabelColor = Color.White
@@ -1977,29 +2004,45 @@ fun StudentStudyAndExamsView(
           )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-        FilterChip(
-          selected = filterByAdmissionBatchOnly,
-          onClick = onToggleBatchFilter,
-          leadingIcon = {
+        Spacer(modifier = Modifier.height(6.dp))
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = BrandPrimary.copy(alpha = 0.08f),
+          border = BorderStroke(1.dp, BrandPrimary.copy(alpha = 0.2f)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
             Icon(
-              imageVector = if (filterByAdmissionBatchOnly) Icons.Default.FilterAlt else Icons.Default.FilterAltOff,
+              imageVector = Icons.Default.CheckCircle,
               contentDescription = null,
-              modifier = Modifier.size(14.dp)
+              tint = BrandPrimary,
+              modifier = Modifier.size(16.dp)
             )
-          },
-          label = {
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-              if (filterByAdmissionBatchOnly) "Admission Batch: ${batch?.name ?: "Enrolled"}" else "Showing: All Batches",
+              text = "Admission Batch Notes & Tests: ${batch?.name ?: "Enrolled"}",
               fontSize = 11.sp,
-              fontWeight = FontWeight.SemiBold
+              fontWeight = FontWeight.Bold,
+              color = BrandPrimary
             )
-          },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BrandGoldLight,
-            selectedLabelColor = BrandGoldDark
-          )
-        )
+            Spacer(modifier = Modifier.weight(1f))
+            Surface(
+              shape = RoundedCornerShape(4.dp),
+              color = BrandGoldLight
+            ) {
+              Text(
+                text = "Batch Only",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = BrandGoldDark,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+          }
+        }
       }
     }
 

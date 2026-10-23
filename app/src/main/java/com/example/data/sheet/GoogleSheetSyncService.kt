@@ -219,6 +219,298 @@ class GoogleSheetSyncService {
     }
   }
 
+  suspend fun syncTables(tables: Map<String, JSONArray>): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val tablesObj = JSONObject()
+      for ((tableName, tableArray) in tables) {
+        tablesObj.put(tableName, tableArray)
+      }
+      val payload = JSONObject().apply {
+        put("action", "sync")
+        put("tables", tablesObj)
+      }
+      postJson(payload)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun syncFeeTransactions(payments: List<FeePayment>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildFeeTransactionsTable(payments)
+    syncTables(mapOf("Fee_Transactions" to arr))
+  }
+
+  suspend fun syncStudents(students: List<Student>, courses: List<Course>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildStudentsTable(students, courses)
+    syncTables(mapOf("Students" to arr))
+  }
+
+  suspend fun syncDiscounts(discounts: List<Discount>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildDiscountsTable(discounts)
+    syncTables(mapOf("Discounts" to arr))
+  }
+
+  suspend fun syncExpenses(expenses: List<Expense>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildExpensesTable(expenses)
+    syncTables(mapOf("Expenses" to arr))
+  }
+
+  suspend fun syncLiveClasses(sessions: List<LiveClassSession>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildLiveClassesTable(sessions)
+    syncTables(mapOf("Live_Classes" to arr))
+  }
+
+  suspend fun syncAdmissions(admissions: List<AdmissionApplication>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildAdmissionsTable(admissions)
+    syncTables(mapOf("Admissions" to arr))
+  }
+
+  fun buildFeeTransactionsTable(payments: List<FeePayment>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Receipt No")
+      put("Payment ID")
+      put("Student ID")
+      put("Student Name")
+      put("Amount Paid (₹)")
+      put("Payment Mode")
+      put("Months Covered")
+      put("Transaction Ref / UPI")
+      put("Payment Date")
+      put("Approval Status")
+      put("Approved By")
+      put("Rejection Reason")
+    }
+    arr.put(header)
+    for (p in payments) {
+      val row = JSONArray().apply {
+        put(p.receiptNo)
+        put(p.id)
+        put(p.studentId)
+        put(p.studentName)
+        put(p.finalAmountPaid)
+        put(p.paymentMode)
+        put(p.month.ifBlank { p.monthsCovered.joinToString(", ") })
+        put(p.transactionRef ?: "")
+        put(p.paymentDate)
+        put(p.status)
+        put(p.approvedBy ?: "")
+        put(p.rejectionReason ?: "")
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildStudentsTable(students: List<Student>, courses: List<Course>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Student ID")
+      put("Roll No")
+      put("Full Name")
+      put("Mobile Number")
+      put("Aadhaar No")
+      put("Email")
+      put("Guardian Name")
+      put("Guardian Phone")
+      put("Residential Address")
+      put("Course ID")
+      put("Batch ID")
+      put("Admission Date")
+      put("Status")
+      put("Custom Fee Override (₹)")
+      put("Monthly Base Fee (₹)")
+      put("Total Paid (₹)")
+      put("Outstanding Due (₹)")
+    }
+    arr.put(header)
+    for (s in students) {
+      val c = courses.firstOrNull { it.id == s.courseId }
+      val baseFee = s.customMonthlyFeeOverride ?: c?.monthlyFee ?: 400.0
+      val row = JSONArray().apply {
+        put(s.id)
+        put(s.rollNo)
+        put(s.name)
+        put(s.mobile)
+        put(s.aadhaarNo)
+        put(s.email ?: "")
+        put(s.guardianName)
+        put(s.guardianPhone)
+        put(s.address)
+        put(s.courseId)
+        put(s.batchId)
+        put(s.admissionDate)
+        put(s.status)
+        put(s.customMonthlyFeeOverride ?: "")
+        put(baseFee)
+        put(s.totalPaidInSheet ?: 0.0)
+        put(0.0)
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildDiscountsTable(discounts: List<Discount>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Discount ID")
+      put("Discount Title")
+      put("Discount Type (flat/percentage)")
+      put("Value (₹ / %)")
+      put("Scope (all/class/course/batch/student)")
+      put("Target Academic Class")
+      put("Target Course ID")
+      put("Target Batch ID")
+      put("Target Student ID")
+      put("Applicable Months Type")
+      put("Selected Months")
+      put("Reason / Description")
+      put("Active Status")
+      put("Created At")
+    }
+    arr.put(header)
+    for (d in discounts) {
+      val row = JSONArray().apply {
+        put(d.id)
+        put(d.title)
+        put(d.type)
+        put(d.value)
+        put(d.scope)
+        put(d.academicClass ?: "")
+        put(d.courseId ?: "")
+        put(d.batchId ?: "")
+        put(d.studentId ?: "")
+        put(d.applicableMonthsType)
+        put(d.selectedMonths?.joinToString(", ") ?: "")
+        put(d.reason ?: "")
+        put(if (d.active) "Active" else "Inactive")
+        put("2026-07-01")
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildExpensesTable(expenses: List<Expense>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Expense ID")
+      put("Category")
+      put("Expense Title")
+      put("Amount Paid (₹)")
+      put("Payment Date")
+      put("Paid To / Vendor")
+      put("Payment Mode")
+      put("Receipt Reference")
+      put("Notes")
+    }
+    arr.put(header)
+    for (e in expenses) {
+      val row = JSONArray().apply {
+        put(e.id)
+        put(e.category)
+        put(e.title)
+        put(e.amount)
+        put(e.expenseDate)
+        put(e.approvedBy)
+        put(e.paymentMode)
+        put(e.id)
+        put(e.remarks ?: "")
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildLiveClassesTable(sessions: List<LiveClassSession>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Session ID")
+      put("Class Title")
+      put("Academic Class")
+      put("Subject")
+      put("Course ID")
+      put("Batch ID")
+      put("Educator Name")
+      put("Date")
+      put("Start Time")
+      put("End Time")
+      put("Status")
+      put("Platform")
+      put("Meeting Link / Room ID")
+      put("Recording Available")
+      put("Created At")
+    }
+    arr.put(header)
+    for (s in sessions) {
+      val row = JSONArray().apply {
+        put(s.id)
+        put(s.title)
+        put("Class 11")
+        put(s.subject)
+        put(s.courseId ?: "")
+        put(s.batchId ?: "")
+        put(s.educatorName)
+        put(s.scheduledDate)
+        put(s.startTime)
+        put(s.endTime)
+        put(s.status)
+        put(s.platform)
+        put(s.meetingUrl ?: "")
+        put("No")
+        put("2026-07-01")
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildAdmissionsTable(admissions: List<AdmissionApplication>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Application ID")
+      put("Student Name")
+      put("Mobile Number")
+      put("Aadhaar No")
+      put("Email")
+      put("Guardian Name")
+      put("Guardian Phone")
+      put("Target Course ID")
+      put("Status")
+      put("Applied Date")
+      put("Initial Fee Status")
+      put("Payment Mode")
+      put("Transaction Ref / UPI")
+      put("Staff Remarks")
+      put("Rejection Reason")
+      put("Address")
+    }
+    arr.put(header)
+    for (a in admissions) {
+      val row = JSONArray().apply {
+        put(a.id)
+        put(a.studentName)
+        put(a.mobile)
+        put(a.aadhaarNo)
+        put(a.email ?: "")
+        put(a.guardianName)
+        put(a.guardianPhone)
+        put(a.targetCourseId)
+        put(a.status)
+        put(a.appliedDate)
+        put(a.initialPaymentStatus)
+        put(a.initialPaymentMode)
+        put(a.initialPaymentRef ?: "")
+        put(a.remarks ?: "")
+        put(a.rejectionReason ?: "")
+        put(a.address)
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
   private fun postJson(json: JSONObject): Result<Boolean> {
     return try {
       val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -230,13 +522,16 @@ class GoogleSheetSyncService {
         .build()
 
       val response = client.newCall(request).execute()
-      Result.success(response.isSuccessful)
+      val bodyStr = response.body?.string() ?: ""
+      val ok = response.isSuccessful && !bodyStr.contains("\"error\"")
+      Result.success(ok)
     } catch (e: Exception) {
       Result.failure(e)
     }
   }
 
   private fun parseWebhookData(obj: JSONObject): DatabaseDataDto {
+    val centerInfo = parseCenterInfo(obj.optJSONArray("Center_Overview") ?: obj.optJSONArray("Center_Info"))
     val students = parseStudents(obj.optJSONArray("Students"))
     val (courses, batches) = parseCoursesAndBatches(obj.optJSONArray("Courses_Batches"))
     val payments = parsePayments(obj.optJSONArray("Fee_Transactions"))
@@ -253,7 +548,7 @@ class GoogleSheetSyncService {
     val expenses = parseExpenses(obj.optJSONArray("Expenses"))
 
     return DatabaseDataDto(
-      centerInfo = LocalDataStore.INITIAL_CENTER,
+      centerInfo = centerInfo,
       students = students,
       courses = courses,
       batches = batches,
@@ -270,6 +565,46 @@ class GoogleSheetSyncService {
       studentTelemetries = emptyList(),
       expenses = expenses,
       adminAccounts = adminAccounts
+    )
+  }
+
+  private fun parseCenterInfo(arr: JSONArray?): CenterInfo {
+    if (arr == null || arr.length() <= 1) return LocalDataStore.INITIAL_CENTER
+    val map = mutableMapOf<String, String>()
+    for (i in 1 until arr.length()) {
+      val row = arr.optJSONArray(i) ?: continue
+      val key = optCell(row, 0)
+      val value = optCell(row, 1)
+      if (key.isNotBlank()) {
+        map[key] = value
+      }
+    }
+    val name = map["Institute Name"]?.ifBlank { null } ?: "Pixel Pathsala"
+    val tagline = map["Tagline / Motto"]?.ifBlank { null } ?: "Code your dream, decode the future"
+    val address = listOfNotNull(
+      map["Campus Address"]?.ifBlank { null },
+      map["City & State"]?.ifBlank { null }
+    ).joinToString(", ").ifBlank { "Raina, Purba Bardhaman, West Bengal" }
+    val phone = map["Primary Helpline Phone"]?.ifBlank { null }
+      ?: map["Office Desk Phone (Alternate)"]?.ifBlank { null }
+      ?: "+91 7908457219"
+    val email = map["Official Email"]?.ifBlank { null } ?: "pixelpathsala+edu@gmail.com"
+    val upiId = map["UPI ID for Fees"]?.ifBlank { null } ?: "9775708722@apl"
+    val upiName = map["UPI Payee Name"]?.ifBlank { null } ?: "Pixel Pathsala Center"
+    val qrCodeUrl = map["Center Logo URL"]?.ifBlank { null }
+    val websiteUrl = map["Facebook Page URL"]?.ifBlank { null } ?: "https://pixelpathsala.com"
+
+    return CenterInfo(
+      id = "center-1",
+      name = name,
+      tagLine = tagline,
+      address = address,
+      phone = phone,
+      email = email,
+      upiId = upiId,
+      upiName = upiName,
+      qrCodeUrl = qrCodeUrl,
+      websiteUrl = websiteUrl
     )
   }
 
@@ -599,6 +934,26 @@ class GoogleSheetSyncService {
     return list
   }
 
+  private fun cleanDateOrTime(raw: String): String {
+    if (raw.isBlank()) return raw
+    if (raw.contains("T") && raw.endsWith("Z")) {
+      if (raw.startsWith("1899-") || raw.startsWith("1900-")) {
+        return try {
+          val timePart = raw.substringAfter("T").substringBefore(".").substringBefore("Z")
+          val parts = timePart.split(":")
+          val h = parts[0].toIntOrNull() ?: 10
+          val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+          val ampm = if (h >= 12) "PM" else "AM"
+          val h12 = if (h % 12 == 0) 12 else if (h > 12) h - 12 else h
+          String.format(java.util.Locale.US, "%02d:%02d %s", h12, m, ampm)
+        } catch (_: Exception) { raw }
+      } else {
+        return raw.substringBefore("T")
+      }
+    }
+    return raw
+  }
+
   private fun parseLiveClasses(arr: JSONArray?): List<LiveClassSession> {
     if (arr == null) return emptyList()
     val list = mutableListOf<LiveClassSession>()
@@ -611,16 +966,17 @@ class GoogleSheetSyncService {
         LiveClassSession(
           id = id,
           title = title,
-          subject = optCell(row, 2).ifBlank { "Computer Science" },
-          courseId = optCell(row, 3),
-          batchId = optCell(row, 4),
-          educatorName = optCell(row, 5).ifBlank { "Faculty" },
-          scheduledDate = optCell(row, 6),
-          startTime = optCell(row, 7).ifBlank { "10:00 AM" },
-          endTime = optCell(row, 8).ifBlank { "11:30 AM" },
-          status = optCell(row, 9).ifBlank { "scheduled" },
-          platform = optCell(row, 10).ifBlank { "Google Meet" },
-          meetingUrl = optCell(row, 11).ifBlank { "https://meet.google.com/new" }
+          academicClass = optCell(row, 2),
+          subject = optCell(row, 3).ifBlank { "Computer Science" },
+          courseId = optCell(row, 4),
+          batchId = optCell(row, 5),
+          educatorName = optCell(row, 6).ifBlank { "Faculty" },
+          scheduledDate = cleanDateOrTime(optCell(row, 7)),
+          startTime = cleanDateOrTime(optCell(row, 8)).ifBlank { "10:00 AM" },
+          endTime = cleanDateOrTime(optCell(row, 9)).ifBlank { "11:30 AM" },
+          status = optCell(row, 10).ifBlank { "scheduled" },
+          platform = optCell(row, 11).ifBlank { "Google Meet" },
+          meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" }
         )
       )
     }
@@ -635,15 +991,20 @@ class GoogleSheetSyncService {
       val id = optCell(row, 0)
       val title = optCell(row, 1)
       if (id.isBlank() || title.isBlank()) continue
+      val topic = optCell(row, 4)
+      val chapter = optCell(row, 5)
+      val desc = if (topic.isNotBlank() || chapter.isNotBlank()) "$topic • $chapter" else optCell(row, 13)
       list.add(
         ClassRecording(
           id = id,
           title = title,
-          subject = optCell(row, 2),
-          recordingUrl = optCell(row, 3),
-          durationMinutes = optCell(row, 4).toIntOrNull() ?: 60,
-          dateRecorded = optCell(row, 5),
-          description = optCell(row, 6)
+          subject = optCell(row, 3).ifBlank { optCell(row, 2) },
+          courseId = optCell(row, 6),
+          batchId = optCell(row, 7),
+          dateRecorded = cleanDateOrTime(optCell(row, 9)),
+          durationMinutes = optCell(row, 10).toIntOrNull() ?: 60,
+          recordingUrl = optCell(row, 12),
+          description = desc
         )
       )
     }
@@ -663,10 +1024,12 @@ class GoogleSheetSyncService {
           id = id,
           title = title,
           subject = optCell(row, 2),
-          fileUrl = optCell(row, 3),
-          fileType = optCell(row, 4).ifBlank { "PDF" },
-          uploadedDate = optCell(row, 5),
-          description = optCell(row, 6)
+          courseId = optCell(row, 3),
+          batchId = optCell(row, 4),
+          fileType = optCell(row, 5).ifBlank { "PDF" },
+          fileUrl = optCell(row, 8),
+          uploadedDate = cleanDateOrTime(optCell(row, 10)),
+          description = optCell(row, 12)
         )
       )
     }

@@ -29,6 +29,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name="com.example.util.ClassAlarmReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

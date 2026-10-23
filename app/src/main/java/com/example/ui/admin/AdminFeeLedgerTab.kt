@@ -32,6 +32,7 @@ fun AdminFeeLedgerTab(
   batches: List<Batch>,
   discounts: List<Discount>,
   payments: List<FeePayment>,
+  centerInfo: CenterInfo = CenterInfo(),
   onOpenCollectFeeDialog: (Student?) -> Unit,
   onViewReceipt: (FeePayment) -> Unit,
   onDeletePayment: (String) -> Unit,
@@ -223,34 +224,80 @@ fun AdminFeeLedgerTab(
         } else {
           items(payments) { p ->
             Card(
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(16.dp),
               colors = CardDefaults.cardColors(containerColor = Color.White),
-              elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+              border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
               modifier = Modifier.fillMaxWidth()
             ) {
               Column(modifier = Modifier.padding(16.dp)) {
+                // AMOUNT IN ONE LINE with smooth badges and receipt number
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.Top
+                  verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Column {
-                    Text(text = p.studentName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                      text = "${p.receiptNo} • ${p.month.ifBlank { p.monthsCovered.joinToString(", ") }}",
-                      fontSize = 12.sp,
-                      color = Slate600
-                    )
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                  ) {
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = BrandPrimary.copy(alpha = 0.12f)
+                    ) {
+                      Text(
+                        text = "₹${p.finalAmountPaid.toInt()}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = BrandPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                      )
+                    }
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = if (p.status.equals("approved", true)) SuccessGreenLight else WarningAmber.copy(alpha = 0.2f)
+                    ) {
+                      Text(
+                        text = p.status.uppercase(),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (p.status.equals("approved", true)) SuccessGreen else BrandGoldDark,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                      )
+                    }
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = Slate100
+                    ) {
+                      Text(
+                        text = p.paymentMode,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Slate700,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                      )
+                    }
                   }
                   Text(
-                    text = "₹${p.finalAmountPaid.toInt()}",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Slate900
+                    text = p.receiptNo,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Slate500
                   )
                 }
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(text = p.studentName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                  text = "Covered: ${p.month.ifBlank { p.monthsCovered.joinToString(", ") }}",
+                  fontSize = 12.sp,
+                  color = Slate600
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9))
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
@@ -259,26 +306,30 @@ fun AdminFeeLedgerTab(
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Text(
-                    text = "Mode: ${p.paymentMode} • Date: ${p.paymentDate}",
+                    text = if (p.paymentDate.isNotBlank()) "Date: ${p.paymentDate.take(10)}" else "Recorded Desk",
                     fontSize = 11.sp,
-                    color = Slate600
+                    color = Slate500
                   )
 
                   Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
+                    Button(
                       onClick = { onViewReceipt(p) },
-                      contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                      colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+                      shape = RoundedCornerShape(8.dp),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                      Icon(Icons.Default.Receipt, contentDescription = null, tint = BrandPrimary, modifier = Modifier.size(16.dp))
+                      Icon(Icons.Default.Receipt, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                       Spacer(modifier = Modifier.width(4.dp))
-                      Text("Receipt", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+                      Text("Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
+
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     IconButton(
                       onClick = { onDeletePayment(p.id) },
                       modifier = Modifier.size(32.dp)
                     ) {
-                      Icon(Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed, modifier = Modifier.size(18.dp))
+                      Icon(Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed, modifier = Modifier.size(16.dp))
                     }
                   }
                 }
@@ -617,7 +668,7 @@ fun AdminFeeLedgerTab(
 
                 Button(
                   onClick = {
-                    val msg = "Dear Parent/Student ${st.name}, Fee statement for ${course?.title ?: "Pixel Pathsala"}: Total Due: ₹${dues.totalOutstandingDue.toInt()} (${dues.pendingMonths.joinToString(", ") { it.monthLabel }}). Please deposit counter cash or UPI: suparnakantidatta@okaxis. Pixel Pathsala Office: +91 9475934733"
+                    val msg = "Dear Parent/Student ${st.name}, Fee statement for ${course?.title ?: centerInfo.name}: Total Due: ₹${dues.totalOutstandingDue.toInt()} (${dues.pendingMonths.joinToString(", ") { it.monthLabel }}). Please deposit counter cash or UPI: ${centerInfo.upiId}. ${centerInfo.name} Helpline: ${centerInfo.phone}"
                     val phone = st.guardianPhone.ifBlank { st.mobile }
                     val cleanPhone = phone.replace("+", "").replace(" ", "").replace("-", "")
                     val fullPhone = if (cleanPhone.length == 10) "91$cleanPhone" else cleanPhone

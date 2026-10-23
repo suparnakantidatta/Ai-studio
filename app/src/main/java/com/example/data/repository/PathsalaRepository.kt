@@ -295,6 +295,8 @@ class PathsalaRepository private constructor(context: Context) {
     // Push to Google Sheet in background
     scope.launch {
       sheetService.pushNewPayment(payment)
+      sheetService.syncFeeTransactions(_payments.value)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
 
     return Result.success(payment)
@@ -379,6 +381,8 @@ class PathsalaRepository private constructor(context: Context) {
 
     scope.launch {
       sheetService.pushNewPayment(payment)
+      sheetService.syncFeeTransactions(_payments.value)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
 
     return Result.success(payment)
@@ -391,6 +395,7 @@ class PathsalaRepository private constructor(context: Context) {
 
     scope.launch {
       sheetService.pushNewDiscount(discount)
+      sheetService.syncDiscounts(_discounts.value)
     }
     return Result.success(true)
   }
@@ -411,6 +416,8 @@ class PathsalaRepository private constructor(context: Context) {
 
     scope.launch {
       sheetService.updatePaymentApproval(paymentId, "approved", approverName, null)
+      sheetService.syncFeeTransactions(_payments.value)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
     return Result.success(true)
   }
@@ -431,6 +438,7 @@ class PathsalaRepository private constructor(context: Context) {
 
     scope.launch {
       sheetService.updatePaymentApproval(paymentId, "rejected", rejectedBy, reason)
+      sheetService.syncFeeTransactions(_payments.value)
     }
     return Result.success(true)
   }
@@ -446,6 +454,7 @@ class PathsalaRepository private constructor(context: Context) {
 
     scope.launch {
       sheetService.pushNewStudent(student)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
 
     if (initialPaymentAmount != null && initialPaymentAmount > 0) {
@@ -474,7 +483,10 @@ class PathsalaRepository private constructor(context: Context) {
       val updatedPayments = _payments.value + payment
       _payments.value = updatedPayments
       localStore.savePayments(updatedPayments)
-      scope.launch { sheetService.pushNewPayment(payment) }
+      scope.launch {
+        sheetService.pushNewPayment(payment)
+        sheetService.syncFeeTransactions(_payments.value)
+      }
     }
 
     return Result.success(student)
@@ -544,6 +556,7 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.saveExpenses(updated)
     scope.launch {
       sheetService.pushExpense(expense)
+      sheetService.syncExpenses(_expenses.value)
     }
   }
 
@@ -551,12 +564,18 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _expenses.value.map { if (it.id == expense.id) expense else it }
     _expenses.value = updated
     localStore.saveExpenses(updated)
+    scope.launch {
+      sheetService.syncExpenses(_expenses.value)
+    }
   }
 
   fun deleteExpense(expenseId: String) {
     val updated = _expenses.value.filterNot { it.id == expenseId }
     _expenses.value = updated
     localStore.saveExpenses(updated)
+    scope.launch {
+      sheetService.syncExpenses(_expenses.value)
+    }
   }
 
   // --- LIVE CLASSES CRUD ---
@@ -566,6 +585,7 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.saveLiveClasses(updated)
     scope.launch {
       sheetService.pushLiveClass(session)
+      sheetService.syncLiveClasses(_liveClasses.value)
     }
   }
 
@@ -580,6 +600,7 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.saveLiveClasses(updated)
     scope.launch {
       sheetService.pushLiveClass(session)
+      sheetService.syncLiveClasses(_liveClasses.value)
     }
   }
 
@@ -587,6 +608,9 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _liveClasses.value.filterNot { it.id == sessionId }
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
+    scope.launch {
+      sheetService.syncLiveClasses(_liveClasses.value)
+    }
   }
 
   fun togglePostponeClass(sessionId: String, isPostponed: Boolean, reason: String? = null) {
@@ -641,6 +665,7 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.saveStudents(updated)
     scope.launch {
       sheetService.pushNewStudent(student)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
   }
 
@@ -648,6 +673,19 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _students.value.filterNot { it.id == studentId }
     _students.value = updated
     localStore.saveStudents(updated)
+    scope.launch {
+      sheetService.syncStudents(_students.value, _courses.value)
+    }
+  }
+
+  // --- PAYMENTS CRUD ---
+  fun deletePayment(paymentId: String) {
+    val updated = _payments.value.filterNot { it.id == paymentId }
+    _payments.value = updated
+    localStore.savePayments(updated)
+    scope.launch {
+      sheetService.syncFeeTransactions(_payments.value)
+    }
   }
 
   // --- DISCOUNT RULES CRUD ---
@@ -657,6 +695,7 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.saveDiscounts(updated)
     scope.launch {
       sheetService.pushNewDiscount(discount)
+      sheetService.syncDiscounts(_discounts.value)
     }
   }
 
@@ -664,6 +703,9 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _discounts.value.filterNot { it.id == discountId }
     _discounts.value = updated
     localStore.saveDiscounts(updated)
+    scope.launch {
+      sheetService.syncDiscounts(_discounts.value)
+    }
   }
 
   // --- FEE DUE REMINDER NOTIFICATIONS ---

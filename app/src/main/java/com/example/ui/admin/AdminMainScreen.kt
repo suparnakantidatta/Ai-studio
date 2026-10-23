@@ -48,6 +48,7 @@ fun AdminMainScreen(
 
   val students by repository.students.collectAsState()
   val context = LocalContext.current
+  val centerInfo by repository.centerInfo.collectAsState()
   val courses by repository.courses.collectAsState()
   val batches by repository.batches.collectAsState()
   val payments by repository.payments.collectAsState()
@@ -210,6 +211,7 @@ fun AdminMainScreen(
           batches = batches,
           discounts = discounts,
           payments = payments,
+          centerInfo = centerInfo,
           onCollectFee = { studentId, months, mode, ref, remarks ->
             coroutineScope.launch {
               repository.collectFeePayment(
@@ -232,6 +234,7 @@ fun AdminMainScreen(
           },
           onOpenDiscountDialog = { showManageDiscountsDialog = true },
           onViewReceipt = { viewReceiptPayment = it },
+          onDeletePayment = { paymentId -> repository.deletePayment(paymentId) },
           onSendReminder = { student, dueAmount, pendingMonths, customMsg ->
             repository.sendFeeDueReminder(
               context = context,
@@ -747,36 +750,84 @@ fun AdminOverviewTab(
 
     // Recent Payments
     Text(text = "Recent Transactions", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
-    payments.takeLast(4).reversed().forEach { p ->
+    payments.takeLast(6).reversed().forEach { p ->
       Card(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+        border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
         modifier = Modifier.fillMaxWidth()
       ) {
-        Row(
+        Column(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween
+            .padding(14.dp)
         ) {
-          Column {
-            Text(text = p.studentName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Slate900)
-            Text(text = "${p.receiptNo} • ${p.month.ifBlank { p.monthsCovered.joinToString() }}", fontSize = 11.sp, color = Slate600)
-          }
-          Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = if (p.status == "approved") SuccessGreenLight else WarningAmber.copy(alpha = 0.2f)
+          // Badges of amount, approval status, and mode in ONE LINE above name
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
           ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = BrandPrimary.copy(alpha = 0.1f)
+              ) {
+                Text(
+                  text = "₹${p.finalAmountPaid.toInt()}",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  color = BrandPrimary,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (p.status.equals("approved", ignoreCase = true)) SuccessGreenLight else WarningAmber.copy(alpha = 0.2f)
+              ) {
+                Text(
+                  text = p.status.uppercase(),
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (p.status.equals("approved", ignoreCase = true)) SuccessGreen else BrandGoldDark,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Slate100
+              ) {
+                Text(
+                  text = p.paymentMode,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Slate700,
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+              }
+            }
             Text(
-              text = "₹${p.finalAmountPaid.toInt()} (${p.status.uppercase()})",
-              fontSize = 12.sp,
+              text = p.receiptNo,
+              fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
-              color = if (p.status == "approved") SuccessGreen else BrandGoldDark,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              color = Slate400
             )
           }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          // Student name below the badge line
+          Text(text = p.studentName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = "${p.receiptNo} • ${p.month.ifBlank { p.monthsCovered.joinToString() }} • ${if (p.paymentDate.isNotBlank()) p.paymentDate.take(10) else "Recorded"}",
+            fontSize = 11.sp,
+            color = Slate600
+          )
         }
       }
     }
@@ -790,16 +841,20 @@ fun AdminFeeDeskTab(
   batches: List<Batch>,
   discounts: List<Discount>,
   payments: List<FeePayment>,
+  centerInfo: CenterInfo = CenterInfo(),
   onCollectFee: (studentId: String, months: List<String>, mode: String, ref: String?, remarks: String?) -> Unit,
   onApprovePayment: (paymentId: String) -> Unit,
   onRejectPayment: (FeePayment) -> Unit,
   onOpenDiscountDialog: () -> Unit,
   onViewReceipt: (FeePayment) -> Unit,
+  onDeletePayment: (String) -> Unit = {},
   onSendReminder: (student: Student, dueAmount: Double, pendingMonths: String, message: String?) -> Unit = { _, _, _, _ -> }
 ) {
   val context = LocalContext.current
   var selectedStudent by remember { mutableStateOf<Student?>(students.firstOrNull()) }
   var searchQuery by remember { mutableStateOf("") }
+  var selectedClassFilter by remember { mutableStateOf("ALL") }
+  var selectedModeFilter by remember { mutableStateOf("ALL") }
   var paymentMode by remember { mutableStateOf("CASH") }
   var transactionRef by remember { mutableStateOf("") }
   var remarks by remember { mutableStateOf("") }
@@ -817,12 +872,36 @@ fun AdminFeeDeskTab(
     payments.filter { it.status.equals("pending", ignoreCase = true) }
   }
 
-  val filteredStudents = remember(searchQuery, students) {
-    if (searchQuery.isBlank()) students
-    else students.filter {
-      it.name.contains(searchQuery, ignoreCase = true) ||
-      it.rollNo.contains(searchQuery, ignoreCase = true) ||
-      it.mobile.contains(searchQuery)
+  val availableClasses = remember(courses, students) {
+    val list = mutableListOf("ALL")
+    courses.forEach { c ->
+      val label = c.academicClass.ifBlank { c.title }
+      if (label.isNotBlank() && label !in list) list.add(label)
+    }
+    list
+  }
+  val availableModes = listOf("ALL", "OFFLINE", "ONLINE")
+
+  val filteredStudents = remember(searchQuery, selectedClassFilter, selectedModeFilter, students, courses, batches) {
+    students.filter { st ->
+      val c = courses.firstOrNull { it.id == st.courseId }
+      val b = batches.firstOrNull { it.id == st.batchId }
+
+      val matchesSearch = searchQuery.isBlank() ||
+        st.name.contains(searchQuery, ignoreCase = true) ||
+        st.rollNo.contains(searchQuery, ignoreCase = true) ||
+        st.mobile.contains(searchQuery)
+
+      val matchesClass = selectedClassFilter == "ALL" ||
+        (c?.academicClass?.equals(selectedClassFilter, ignoreCase = true) == true) ||
+        (c?.title?.equals(selectedClassFilter, ignoreCase = true) == true) ||
+        (st.studentClass?.equals(selectedClassFilter, ignoreCase = true) == true)
+
+      val matchesMode = selectedModeFilter == "ALL" ||
+        (st.mode.equals(selectedModeFilter, ignoreCase = true)) ||
+        (b?.mode?.equals(selectedModeFilter, ignoreCase = true) == true)
+
+      matchesSearch && matchesClass && matchesMode
     }
   }
 
@@ -899,12 +978,13 @@ fun AdminFeeDeskTab(
         batches = batches,
         discounts = discounts,
         payments = payments,
+        centerInfo = centerInfo,
         onOpenCollectFeeDialog = { st ->
           if (st != null) selectedStudent = st
           feeSubTab = 0
         },
         onViewReceipt = onViewReceipt,
-        onDeletePayment = {},
+        onDeletePayment = onDeletePayment,
         onEditStudent = {},
         onSendReminder = { st, due, months ->
           onSendReminder(st, due, months, null)
@@ -1037,6 +1117,48 @@ fun AdminFeeDeskTab(
 
           Spacer(modifier = Modifier.height(8.dp))
 
+          // Class-wise Filter
+          Text(text = "Filter by Class / Program:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Slate600)
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            availableClasses.forEach { cls ->
+              FilterChip(
+                selected = selectedClassFilter == cls,
+                onClick = { selectedClassFilter = cls },
+                label = { Text(cls, fontSize = 11.sp) }
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(6.dp))
+
+          // Mode-wise Filter
+          Text(text = "Filter by Mode:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Slate600)
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            availableModes.forEach { md ->
+              FilterChip(
+                selected = selectedModeFilter == md,
+                onClick = { selectedModeFilter = md },
+                label = { Text(md, fontSize = 11.sp) }
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(text = "Select Student (${filteredStudents.size}):", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Slate600)
+          Spacer(modifier = Modifier.height(4.dp))
+
           Row(
             modifier = Modifier
               .fillMaxWidth()
@@ -1087,41 +1209,98 @@ fun AdminFeeDeskTab(
           modifier = Modifier.fillMaxWidth()
         ) {
           Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Student Details Section
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Column {
+              Column(modifier = Modifier.weight(1f)) {
                 Text(text = selectedStudent!!.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
+                Text(text = "Roll No: ${selectedStudent!!.rollNo} • Mobile: ${selectedStudent!!.mobile}", fontSize = 12.sp, color = Slate700)
                 Text(text = "Course: ${studentDues.courseTitle} • Batch: ${studentDues.batchName}", fontSize = 12.sp, color = Slate600)
-                Text(text = "Monthly Fee: ₹${studentDues.standardMonthlyFee.toInt()} • Adm: ${studentDues.admissionMonth}", fontSize = 12.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
+                Text(text = "Monthly Rate: ₹${studentDues.standardMonthlyFee.toInt()} • Adm: ${studentDues.admissionMonth}", fontSize = 12.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
               }
-              Column(horizontalAlignment = Alignment.End) {
-                Surface(
-                  shape = RoundedCornerShape(8.dp),
-                  color = if (studentDues.totalOutstandingDue > 0) ErrorRedLight else SuccessGreenLight
-                ) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (selectedStudent!!.status.equals("active", true)) Color(0xFFDCFCE7) else Slate100
+              ) {
+                Text(
+                  text = selectedStudent!!.status.uppercase(),
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (selectedStudent!!.status.equals("active", true)) SuccessGreen else Slate600,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+            }
+
+            // DUE AND REMINDER BUTTON DESIGNED AS A CARD BELOW STUDENT DETAILS
+            Card(
+              shape = RoundedCornerShape(12.dp),
+              colors = CardDefaults.cardColors(
+                containerColor = if (studentDues.totalOutstandingDue > 0) Color(0xFFFEF2F2) else Color(0xFFF0FDF4)
+              ),
+              border = BorderStroke(
+                1.dp,
+                if (studentDues.totalOutstandingDue > 0) Color(0xFFFECACA) else Color(0xFFBBF7D0)
+              ),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
                   Text(
-                    text = if (studentDues.totalOutstandingDue > 0) "DUE: ₹${studentDues.totalOutstandingDue.toInt()}" else "CLEAR",
-                    fontSize = 12.sp,
+                    text = if (studentDues.totalOutstandingDue > 0) "TOTAL OUTSTANDING DUE" else "TUITION FEE STATUS",
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (studentDues.totalOutstandingDue > 0) ErrorRed else SuccessGreen,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    color = if (studentDues.totalOutstandingDue > 0) ErrorRed else SuccessGreen
                   )
+                  Spacer(modifier = Modifier.height(2.dp))
+                  Text(
+                    text = if (studentDues.totalOutstandingDue > 0) "₹${studentDues.totalOutstandingDue.toInt()}" else "CLEAR (NO DUES)",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (studentDues.totalOutstandingDue > 0) ErrorRed else SuccessGreen
+                  )
+                  if (studentDues.totalOutstandingDue > 0) {
+                    Text(
+                      text = "${studentDues.pendingMonths.size} month(s) pending: ${studentDues.pendingMonths.take(2).joinToString { it.monthLabel }}${if (studentDues.pendingMonths.size > 2) "..." else ""}",
+                      fontSize = 11.sp,
+                      color = Slate600
+                    )
+                  }
                 }
 
                 if (studentDues.totalOutstandingDue > 0) {
-                  Spacer(modifier = Modifier.height(6.dp))
                   Button(
                     onClick = { showSendReminderDialog = true },
                     colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                   ) {
-                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Remind Fee", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Remind Fee", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                  }
+                } else {
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = SuccessGreen
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text("PAID", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                   }
                 }
               }

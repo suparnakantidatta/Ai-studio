@@ -1,11 +1,11 @@
 package com.example.ui.splash
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -13,14 +13,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.theme.BrandGold
 import com.example.ui.theme.BrandPrimary
 import com.example.ui.theme.BrandSecondary
@@ -55,9 +59,9 @@ fun OpeningLogoScreen(
       .background(
         Brush.verticalGradient(
           colors = listOf(
+            Color(0xFF000000),
             BrandSecondary,
-            BrandPrimary,
-            Color(0xFF090D16)
+            Color(0xFF000000)
           )
         )
       ),
@@ -71,60 +75,24 @@ fun OpeningLogoScreen(
         .alpha(alpha)
         .padding(24.dp)
     ) {
-      Box(
-        contentAlignment = Alignment.Center,
+      Image(
+        painter = painterResource(id = R.drawable.pixel_logo),
+        contentDescription = "Pixel Pathsala Logo",
+        contentScale = ContentScale.Fit,
         modifier = Modifier
-          .size(110.dp)
-          .background(
-            Brush.radialGradient(
-              colors = listOf(BrandGold, Color(0xFFD97706), Color.Transparent)
-            ),
-            shape = CircleShape
-          )
-          .padding(4.dp)
-      ) {
-        Box(
-          contentAlignment = Alignment.Center,
-          modifier = Modifier
-            .fillMaxSize()
-            .background(BrandSecondary, shape = CircleShape)
-        ) {
-          Icon(
-            imageVector = Icons.Default.School,
-            contentDescription = "Pixel Pathsala Logo",
-            tint = BrandGold,
-            modifier = Modifier.size(56.dp)
-          )
-        }
-      }
+          .fillMaxWidth(0.9f)
+          .height(180.dp)
+          .clip(RoundedCornerShape(16.dp))
+      )
 
-      Spacer(modifier = Modifier.height(24.dp))
-
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-          text = "PIXEL PATHSALA",
-          fontSize = 28.sp,
-          fontWeight = FontWeight.ExtraBold,
-          letterSpacing = 2.sp,
-          color = Color.White
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Icon(
-          imageVector = Icons.Default.Stars,
-          contentDescription = null,
-          tint = BrandGold,
-          modifier = Modifier.size(20.dp)
-        )
-      }
-
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.height(20.dp))
 
       Text(
-        text = "Premier Tuition & Coaching ERP",
+        text = "Premier Tuition & ERP System",
         fontSize = 14.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         color = BrandGold,
-        letterSpacing = 1.sp,
+        letterSpacing = 1.2.sp,
         textAlign = TextAlign.Center
       )
 

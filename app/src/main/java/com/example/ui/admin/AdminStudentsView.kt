@@ -2,9 +2,11 @@ package com.example.ui.admin
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -287,7 +289,95 @@ fun AdminStudentsView(
               }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Badges in ONE LINE and catchy
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (st.status.equals("active", true)) Color(0xFFDCFCE7) else Slate100,
+                border = BorderStroke(1.dp, if (st.status.equals("active", true)) SuccessGreen.copy(alpha = 0.4f) else Slate300)
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(6.dp)
+                      .background(if (st.status.equals("active", true)) SuccessGreen else Slate500, CircleShape)
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = st.status.uppercase(),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (st.status.equals("active", true)) SuccessGreen else Slate700
+                  )
+                }
+              }
+
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = BrandPrimary.copy(alpha = 0.1f)
+              ) {
+                Text(
+                  text = "Roll: ${st.rollNo}",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = BrandPrimary,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = BrandGold.copy(alpha = 0.15f)
+              ) {
+                Text(
+                  text = st.studentClass ?: course?.academicClass ?: "Class 11",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = BrandGoldDark,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFE0E7FF)
+              ) {
+                Text(
+                  text = (st.mode.ifBlank { batch?.mode ?: "offline" }).uppercase(),
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF3730A3),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+
+              val netRate = ((course?.monthlyFee ?: 400.0) - (st.monthlyDiscount ?: 0.0)).toInt()
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFEF3C7)
+              ) {
+                Text(
+                  text = "₹$netRate/mo",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF92400E),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Info Box Container matching Screenshot 2
             Surface(
