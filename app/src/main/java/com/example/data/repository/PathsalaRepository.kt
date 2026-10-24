@@ -415,8 +415,10 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.savePayments(updatedList)
 
     scope.launch {
-      sheetService.updatePaymentApproval(paymentId, "approved", approverName, null)
-      sheetService.syncFeeTransactions(_payments.value)
+      try {
+        sheetService.updatePaymentApproval(paymentId, "approved", approverName, null)
+      } catch (_: Exception) {}
+      sheetService.syncFeeTransactions(updatedList)
       sheetService.syncStudents(_students.value, _courses.value)
     }
     return Result.success(true)
@@ -437,8 +439,10 @@ class PathsalaRepository private constructor(context: Context) {
     localStore.savePayments(updatedList)
 
     scope.launch {
-      sheetService.updatePaymentApproval(paymentId, "rejected", rejectedBy, reason)
-      sheetService.syncFeeTransactions(_payments.value)
+      try {
+        sheetService.updatePaymentApproval(paymentId, "rejected", rejectedBy, reason)
+      } catch (_: Exception) {}
+      sheetService.syncFeeTransactions(updatedList)
     }
     return Result.success(true)
   }
@@ -522,6 +526,10 @@ class PathsalaRepository private constructor(context: Context) {
     _admissions.value = updatedApps
     localStore.saveAdmissions(updatedApps)
 
+    scope.launch {
+      sheetService.syncAdmissions(updatedApps)
+    }
+
     return enrollNewStudent(
       student = newStudent,
       initialPaymentAmount = app.initialPaymentAmount,
@@ -536,7 +544,41 @@ class PathsalaRepository private constructor(context: Context) {
     }
     _admissions.value = updatedApps
     localStore.saveAdmissions(updatedApps)
+    scope.launch {
+      sheetService.syncAdmissions(updatedApps)
+    }
     return Result.success(true)
+  }
+
+  fun checkPendingAdmissionStatus(identifier: String): AdmissionApplication? {
+    val clean = identifier.trim()
+    if (clean.isBlank()) return null
+    return _admissions.value.firstOrNull { app ->
+      app.status.equals("pending", ignoreCase = true) &&
+        (app.mobile.trim() == clean ||
+         app.id.trim().equals(clean, ignoreCase = true) ||
+         app.applicationNo.trim().equals(clean, ignoreCase = true) ||
+         app.aadhaarNo.trim() == clean ||
+         (app.email != null && app.email.trim().equals(clean, ignoreCase = true)))
+    }
+  }
+
+  fun submitExamSubmission(submission: ExamSubmission) {
+    val current = _submissions.value.filterNot {
+      it.id == submission.id || (it.examId == submission.examId && it.studentId == submission.studentId)
+    }
+    val updated = current + submission
+    _submissions.value = updated
+    localStore.saveExamSubmissions(updated)
+    scope.launch {
+      sheetService.syncSubmissions(updated)
+    }
+  }
+
+  fun getQuestionsForExam(exam: OnlineExam): List<ExamQuestion> {
+    val fromDb = _questions.value.filter { it.examId == exam.id }
+    if (fromDb.isNotEmpty()) return fromDb
+    return com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
   }
 
   fun updateStudentTelemetry(telemetry: StudentTelemetry) {

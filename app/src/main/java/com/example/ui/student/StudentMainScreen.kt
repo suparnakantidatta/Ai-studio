@@ -31,6 +31,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.model.*
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.theme.*
@@ -150,12 +153,88 @@ fun StudentMainScreen(
     }
   }
 
+  // Strictly filter online exams for student's admission batch & course
+  val filteredExams = remember(exams, student.batchId, student.courseId) {
+    exams.filter { exam ->
+      val examBatch = exam.batchId?.trim() ?: ""
+      val examCourse = exam.courseId?.trim() ?: ""
+      when {
+        examBatch.isNotEmpty() && !examBatch.equals("all", ignoreCase = true) -> examBatch == student.batchId
+        examBatch.equals("all", ignoreCase = true) -> examCourse.isEmpty() || examCourse == student.courseId
+        else -> examCourse.isEmpty() || examCourse == student.courseId
+      }
+    }
+  }
+
+  // Runtime location permissions for real-time telemetry (coordinates & installed games)
+  val locationPermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions()
+  ) { perms ->
+    val fineGranted = perms[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+    val coarseGranted = perms[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+    if (fineGranted || coarseGranted) {
+      try {
+        val tel = com.example.util.StudentDeviceMonitor.collectTelemetry(context, student)
+        repository.updateStudentTelemetry(tel)
+      } catch (_: Exception) {}
+    }
+  }
+
+  LaunchedEffect(student.id) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      locationPermissionLauncher.launch(
+        arrayOf(
+          android.Manifest.permission.ACCESS_FINE_LOCATION,
+          android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+      )
+    }
+  }
+
+  // Track class status to trigger audio sound and Toast notification when class is scheduled or postponed
+  var initialClassesProcessed by remember { mutableStateOf(false) }
+  val knownClassesState = remember { mutableMapOf<String, String>() }
+
+  LaunchedEffect(filteredClasses) {
+    if (!initialClassesProcessed) {
+      filteredClasses.forEach { c ->
+        val statusKey = if (c.isPostponed || c.status.equals("postponed", true)) "postponed" else c.status
+        knownClassesState[c.id] = statusKey
+      }
+      initialClassesProcessed = true
+    } else {
+      for (c in filteredClasses) {
+        val currentStatus = if (c.isPostponed || c.status.equals("postponed", true)) "postponed" else c.status
+        val previousStatus = knownClassesState[c.id]
+
+        if (previousStatus == null) {
+          // Newly scheduled class for this student's enrolled batch
+          knownClassesState[c.id] = currentStatus
+          val msg = "📢 New Class Scheduled: ${c.title} (${c.scheduledDate} ${c.startTime})"
+          com.example.util.NotificationHelper.playToastAndSound(context, msg)
+        } else if (previousStatus != currentStatus) {
+          // Class schedule or postponement status updated
+          knownClassesState[c.id] = currentStatus
+          if (currentStatus == "postponed") {
+            val reason = c.postponeReason?.let { ": $it" } ?: ""
+            val msg = "⚠️ Class Postponed: ${c.title} has been postponed$reason"
+            com.example.util.NotificationHelper.playToastAndSound(context, msg)
+          } else {
+            val msg = "🔔 Class Update: ${c.title} is now $currentStatus (${c.startTime})"
+            com.example.util.NotificationHelper.playToastAndSound(context, msg)
+          }
+        }
+      }
+    }
+  }
+
   // Pay Fee Dialog State
   var showPayDialog by remember { mutableStateOf(false) }
   var viewReceiptPayment by remember { mutableStateOf<FeePayment?>(null) }
   var showUpdateDialog by remember { mutableStateOf(false) }
   var showLogoutDialog by remember { mutableStateOf(false) }
   var showRemindersDialog by remember { mutableStateOf(false) }
+  var activeExamForWeb by remember { mutableStateOf<OnlineExam?>(null) }
 
   Scaffold(
     topBar = {
@@ -266,6 +345,12 @@ fun StudentMainScreen(
           icon = { Icon(Icons.Default.MenuBook, contentDescription = "Study") },
           label = { Text("Study") }
         )
+        NavigationBarItem(
+          selected = selectedTab == 4,
+          onClick = { selectedTab = 4 },
+          icon = { Icon(Icons.Default.Terminal, contentDescription = "Playzone") },
+          label = { Text("Playzone") }
+        )
       }
     }
   ) { padding ->
@@ -295,6 +380,7 @@ fun StudentMainScreen(
           onNavigateToFees = { selectedTab = 1 },
           onNavigateToLive = { selectedTab = 2 },
           onNavigateToStudy = { selectedTab = 3 },
+          onNavigateToPlayzone = { selectedTab = 4 },
           onOpenUpdateDialog = { showUpdateDialog = true }
         )
         1 -> StudentFeesView(
@@ -319,12 +405,14 @@ fun StudentMainScreen(
         )
         3 -> StudentStudyAndExamsView(
           materials = filteredMaterials,
-          exams = exams.filter {
-            it.courseId.isNullOrBlank() || it.courseId == student.courseId
-          },
+          exams = filteredExams,
           submissions = submissions.filter { it.studentId == student.id },
-          batch = studentBatch
+          batch = studentBatch,
+          onStartExam = { exam ->
+            activeExamForWeb = exam
+          }
         )
+        4 -> PlayzoneScreen()
       }
 
       // Pay Dialog
@@ -422,6 +510,15 @@ fun StudentMainScreen(
           }
         )
       }
+
+      activeExamForWeb?.let { exam ->
+        ExamWebPlayerDialog(
+          exam = exam,
+          student = student,
+          repository = repository,
+          onDismiss = { activeExamForWeb = null }
+        )
+      }
     }
   }
 }
@@ -442,6 +539,7 @@ fun StudentDashboardView(
   onNavigateToFees: () -> Unit,
   onNavigateToLive: () -> Unit,
   onNavigateToStudy: () -> Unit,
+  onNavigateToPlayzone: () -> Unit = {},
   onOpenUpdateDialog: () -> Unit
 ) {
   val context = LocalContext.current
@@ -923,11 +1021,22 @@ fun StudentDashboardView(
       OutlinedButton(
         onClick = onNavigateToStudy,
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.weight(1f)
       ) {
         Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(modifier = Modifier.width(6.dp))
-        Text("Notes as Web Portal & Exams", fontSize = 12.sp)
+        Text("Study & Exams", fontSize = 12.sp)
+      }
+
+      Button(
+        onClick = onNavigateToPlayzone,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.weight(1f)
+      ) {
+        Icon(Icons.Default.Terminal, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Playzone IDE", fontSize = 12.sp, color = Color.White)
       }
     }
 
@@ -1715,7 +1824,8 @@ fun StudentStudyMaterialsView(materials: List<StudyMaterial>) {
 @Composable
 fun StudentExamsView(
   exams: List<OnlineExam>,
-  submissions: List<ExamSubmission>
+  submissions: List<ExamSubmission>,
+  onStartExam: (OnlineExam) -> Unit = {}
 ) {
   LazyColumn(
     modifier = Modifier
@@ -1724,7 +1834,10 @@ fun StudentExamsView(
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
     item {
-      Text(text = "Assessments & Mock Tests", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+      Column {
+        Text(text = "Assessments & Mock Tests", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+        Text(text = "Online Computer Based Tests (Web Project)", fontSize = 11.sp, color = Slate600)
+      }
     }
 
     if (exams.isEmpty()) {
@@ -1785,6 +1898,31 @@ fun StudentExamsView(
                   Text(text = "${sub.score} / ${sub.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
                 }
               }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+              onClick = { onStartExam(exam) },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = if (sub != null) Color(0xFF1E293B) else BrandPrimary
+              ),
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+            ) {
+              Icon(
+                imageVector = if (sub != null) Icons.Default.Visibility else Icons.Default.PlayCircleOutline,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = if (sub != null) "Review Exam & Solutions (Web CBT)" else "Start Online Exam (Web CBT)",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+              )
             }
           }
         }
@@ -1956,7 +2094,8 @@ fun StudentStudyAndExamsView(
   materials: List<StudyMaterial>,
   exams: List<OnlineExam>,
   submissions: List<ExamSubmission>,
-  batch: Batch? = null
+  batch: Batch? = null,
+  onStartExam: (OnlineExam) -> Unit = {}
 ) {
   var selectedSubTab by remember { mutableIntStateOf(0) }
 
@@ -2049,7 +2188,7 @@ fun StudentStudyAndExamsView(
     if (selectedSubTab == 0) {
       StudentStudyMaterialsView(materials = materials)
     } else {
-      StudentExamsView(exams = exams, submissions = submissions)
+      StudentExamsView(exams = exams, submissions = submissions, onStartExam = onStartExam)
     }
   }
 }

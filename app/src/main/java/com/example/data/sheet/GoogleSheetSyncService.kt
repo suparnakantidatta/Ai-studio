@@ -265,6 +265,16 @@ class GoogleSheetSyncService {
     syncTables(mapOf("Admissions" to arr))
   }
 
+  suspend fun syncExams(exams: List<OnlineExam>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildExamsTable(exams)
+    syncTables(mapOf("Exams" to arr))
+  }
+
+  suspend fun syncSubmissions(submissions: List<ExamSubmission>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildSubmissionsTable(submissions)
+    syncTables(mapOf("Exam_Submissions" to arr))
+  }
+
   fun buildFeeTransactionsTable(payments: List<FeePayment>): JSONArray {
     val arr = JSONArray()
     val header = JSONArray().apply {
@@ -505,6 +515,74 @@ class GoogleSheetSyncService {
         put(a.remarks ?: "")
         put(a.rejectionReason ?: "")
         put(a.address)
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildExamsTable(exams: List<OnlineExam>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Exam ID")
+      put("Exam Code")
+      put("Title")
+      put("Course ID")
+      put("Batch ID")
+      put("Academic Class")
+      put("Subject")
+      put("Duration (Mins)")
+      put("Total Marks")
+      put("Passing Marks")
+      put("Passing %")
+      put("Status")
+      put("Mode")
+      put("Scheduled Date")
+    }
+    arr.put(header)
+    for (e in exams) {
+      val row = JSONArray().apply {
+        put(e.id)
+        put(e.id)
+        put(e.title)
+        put(e.courseId ?: "")
+        put(e.batchId ?: "")
+        put("Class 11")
+        put(e.subject)
+        put(e.durationMinutes)
+        put(e.totalMarks)
+        put((e.totalMarks * 0.4).toInt())
+        put("40%")
+        put(e.status)
+        put("Online CBT")
+        put(e.scheduledDate)
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
+  fun buildSubmissionsTable(submissions: List<ExamSubmission>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Submission ID")
+      put("Exam ID")
+      put("Student ID")
+      put("Student Name")
+      put("Score")
+      put("Total Marks")
+      put("Submitted At")
+    }
+    arr.put(header)
+    for (s in submissions) {
+      val row = JSONArray().apply {
+        put(s.id)
+        put(s.examId)
+        put(s.studentId)
+        put(s.studentName)
+        put(s.score)
+        put(s.totalMarks)
+        put(s.submittedAt)
       }
       arr.put(row)
     }
@@ -1042,17 +1120,29 @@ class GoogleSheetSyncService {
     for (i in 1 until arr.length()) {
       val row = arr.optJSONArray(i) ?: continue
       val id = optCell(row, 0)
-      val title = optCell(row, 1)
-      if (id.isBlank() || title.isBlank()) continue
+      if (id.isBlank()) continue
+      val title = optCell(row, 2).ifBlank { optCell(row, 1) }
+      if (title.isBlank()) continue
+      val courseId = optCell(row, 3).ifBlank { null }
+      val batchId = optCell(row, 4).ifBlank { null }
+      val subject = optCell(row, 6).ifBlank { optCell(row, 2).ifBlank { "General" } }
+      val duration = (optCell(row, 7).ifBlank { optCell(row, 5) }).toIntOrNull() ?: 30
+      val totalMarks = (optCell(row, 8).ifBlank { optCell(row, 4) }).toIntOrNull() ?: 20
+      val status = optCell(row, 11).ifBlank { optCell(row, 7).ifBlank { "published" } }
+      val rawDate = optCell(row, 13).ifBlank { optCell(row, 6) }
+      val schedDate = cleanDateOrTime(rawDate)
+
       list.add(
         OnlineExam(
           id = id,
           title = title,
-          subject = optCell(row, 2),
-          totalMarks = optCell(row, 4).toIntOrNull() ?: 20,
-          durationMinutes = optCell(row, 5).toIntOrNull() ?: 30,
-          scheduledDate = optCell(row, 6),
-          status = optCell(row, 7).ifBlank { "published" }
+          subject = subject,
+          courseId = courseId,
+          batchId = batchId,
+          totalMarks = totalMarks,
+          durationMinutes = duration,
+          scheduledDate = schedDate,
+          status = status
         )
       )
     }

@@ -137,4 +137,14 @@ object NotificationHelper {
       } catch (_: SecurityException) {}
     } catch (_: Exception) {}
   }
+
+  fun playToastAndSound(context: Context, message: String) {
+    try {
+      val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+      val ringtone = RingtoneManager.getRingtone(context, notificationUri)
+      ringtone?.play()
+    } catch (_: Exception) {}
+    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+  }
 }

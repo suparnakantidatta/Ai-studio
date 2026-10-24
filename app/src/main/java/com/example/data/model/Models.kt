@@ -207,6 +207,7 @@ data class OnlineExam(
   val title: String,
   val subject: String = "General",
   val courseId: String? = null,
+  val batchId: String? = null,
   val totalMarks: Int = 20,
   val durationMinutes: Int = 30,
   val scheduledDate: String = "",
