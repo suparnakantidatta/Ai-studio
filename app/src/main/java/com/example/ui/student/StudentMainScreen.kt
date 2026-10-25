@@ -38,6 +38,7 @@ import com.example.data.model.*
 import com.example.data.repository.PathsalaRepository
 import com.example.ui.theme.*
 import com.example.util.FeeCalculator
+import com.example.util.NotificationHelper
 import kotlinx.coroutines.launch
 
 fun triggerClassAlarm(context: Context, session: LiveClassSession, skipUi: Boolean = false) {
@@ -97,34 +98,34 @@ fun StudentMainScreen(
 
   var alarmsSet by remember { mutableStateOf(setOf<String>()) }
 
-  // Strictly filter class schedule for student's admission batch & course
-  val filteredClasses = remember(liveClasses, student.batchId, student.courseId, batches, courses) {
-    com.example.util.BatchScheduleHelper.getAllBatchesAutomatedSchedule(
-      batches = batches,
-      courses = courses,
-      existingSessions = liveClasses,
-      filterBatchId = student.batchId,
-      filterCourseId = student.courseId
-    )
+  // Strictly filter class schedule for student's admission batch & course from database only
+  val filteredClasses = remember(liveClasses, student.batchId, student.courseId) {
+    liveClasses.filter { session ->
+      val sessBatch = session.batchId?.trim() ?: ""
+      val sessCourse = session.courseId?.trim() ?: ""
+      when {
+        sessBatch.isNotEmpty() && !sessBatch.equals("all", ignoreCase = true) -> sessBatch == student.batchId
+        sessBatch.equals("all", ignoreCase = true) -> sessCourse.isEmpty() || sessCourse == student.courseId
+        sessCourse.isNotEmpty() -> sessCourse == student.courseId
+        else -> true
+      }
+    }
   }
 
-  // Automatic alarm & telemetry update upon student login
-  LaunchedEffect(student.id, studentBatch?.id, filteredClasses) {
+  // Automatic persistent topbar notification & device monitoring
+  LaunchedEffect(student.id, studentBatch?.id, liveClasses, batches) {
     try {
       val tel = com.example.util.StudentDeviceMonitor.collectTelemetry(context, student)
       repository.updateStudentTelemetry(tel)
     } catch (_: Exception) {}
 
-    studentBatch?.let { b ->
-      triggerBatchAlarm(context, b, studentCourse, skipUi = true, showToast = false)
-      alarmsSet = alarmsSet + "batch_${b.id}"
-    }
-
-    val upcomingOnline = filteredClasses.firstOrNull { it.status.equals("scheduled", true) || it.status.equals("live", true) }
-    if (upcomingOnline != null) {
-      triggerClassAlarm(context, upcomingOnline, skipUi = true)
-      alarmsSet = alarmsSet + upcomingOnline.id
-    }
+    // Keeps persistent notification in phone topbar for postponed/scheduled classes
+    NotificationHelper.syncStudentClassNotification(
+      context = context,
+      student = student,
+      liveClasses = liveClasses,
+      batches = batches
+    )
   }
 
   // Strictly filter notes (study materials) for student's admission batch & course
@@ -564,6 +565,206 @@ fun StudentDashboardView(
         onDismiss = { onDismissReminder(activeReminder.id) },
         onPayNow = onNavigateToFees
       )
+    }
+
+    val postponedClass = remember(liveClasses) {
+      liveClasses.firstOrNull { it.isPostponed || it.status.equals("postponed", ignoreCase = true) }
+    }
+    val scheduledClass = remember(liveClasses) {
+      liveClasses.firstOrNull { !it.isPostponed && (it.status.equals("scheduled", true) || it.status.equals("live", true)) }
+    }
+
+    // High-visibility RED BANNER when a class is postponed
+    if (postponedClass != null) {
+      Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
+        border = BorderStroke(1.5.dp, Color(0xFFEF4444)),
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable { onNavigateToLive() }
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+              Surface(
+                shape = CircleShape,
+                color = Color(0xFFFEE2E2),
+                modifier = Modifier.size(34.dp)
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Icon(Icons.Default.EventBusy, contentDescription = "Postponed", tint = Color(0xFFDC2626), modifier = Modifier.size(20.dp))
+                }
+              }
+              Spacer(modifier = Modifier.width(10.dp))
+              Column {
+                Text(
+                  text = "CLASS POSTPONED",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFFDC2626),
+                  letterSpacing = 0.5.sp
+                )
+                Text(
+                  text = postponedClass.title,
+                  fontSize = 15.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF991B1B)
+                )
+              }
+            }
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = Color(0xFFDC2626)
+            ) {
+              Text(
+                text = "NOTICE",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "📅 Scheduled: ${postponedClass.scheduledDate} at ${postponedClass.startTime} (${postponedClass.subject})",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFFB91C1C)
+          )
+
+          Spacer(modifier = Modifier.height(4.dp))
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, Color(0xFFFECACA)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Reason: ${postponedClass.postponeReason ?: "Postponed by center administration"}",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF7F1D1D)
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+          ) {
+            TextButton(
+              onClick = onNavigateToLive,
+              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+              Text("View Class Routine →", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+            }
+          }
+        }
+      }
+    }
+
+    // High-visibility GREEN BANNER when a class is scheduled / active
+    if (scheduledClass != null) {
+      Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+        border = BorderStroke(1.5.dp, Color(0xFF22C55E)),
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable { onNavigateToLive() }
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+              Surface(
+                shape = CircleShape,
+                color = Color(0xFFDCFCE7),
+                modifier = Modifier.size(34.dp)
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Icon(Icons.Default.EventAvailable, contentDescription = "Scheduled", tint = Color(0xFF16A34A), modifier = Modifier.size(20.dp))
+                }
+              }
+              Spacer(modifier = Modifier.width(10.dp))
+              Column {
+                Text(
+                  text = "CLASS SCHEDULED & ACTIVE",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF16A34A),
+                  letterSpacing = 0.5.sp
+                )
+                Text(
+                  text = scheduledClass.title,
+                  fontSize = 15.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF166534)
+                )
+              }
+            }
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = Color(0xFF16A34A)
+            ) {
+              Text(
+                text = "ON TIME",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "📅 Date: ${scheduledClass.scheduledDate} • Timings: ${scheduledClass.startTime} - ${scheduledClass.endTime}",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF15803D)
+          )
+          Text(
+            text = "Subject: ${scheduledClass.subject} • Faculty: ${scheduledClass.educatorName} • Platform: ${scheduledClass.platform}",
+            fontSize = 12.sp,
+            color = Color(0xFF166534)
+          )
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+          ) {
+            FilledTonalButton(
+              onClick = onNavigateToLive,
+              colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFDCFCE7), contentColor = Color(0xFF166534)),
+              shape = RoundedCornerShape(8.dp),
+              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+              Icon(Icons.Default.VideoCall, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Attend / Open Class Details", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
     }
 
     // Welcome Banner Card with Admission Batch details
@@ -1523,8 +1724,8 @@ fun StudentLiveClassesView(
   ) {
     item {
       Column {
-        Text(text = "Automated Batch Class Schedule", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
-        Text(text = "Generated as per enrolled batch date schedule, timings & online/offline routine", fontSize = 12.sp, color = Slate600)
+        Text(text = "Enrolled Batch Class Schedule", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
+        Text(text = "Live database routine for your enrolled batch and course", fontSize = 12.sp, color = Slate600)
       }
     }
 

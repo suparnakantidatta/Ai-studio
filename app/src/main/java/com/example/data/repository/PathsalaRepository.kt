@@ -576,9 +576,55 @@ class PathsalaRepository private constructor(context: Context) {
   }
 
   fun getQuestionsForExam(exam: OnlineExam): List<ExamQuestion> {
-    val fromDb = _questions.value.filter { it.examId == exam.id }
-    if (fromDb.isNotEmpty()) return fromDb
-    return com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
+    val result = mutableListOf<ExamQuestion>()
+    val seenIds = mutableSetOf<String>()
+    val seenTexts = mutableSetOf<String>()
+
+    fun addIfValid(q: ExamQuestion) {
+      val textClean = q.questionText.trim()
+      // Skip empty or garbage questions
+      if (textClean.isBlank() || textClean.length < 3) return
+      // Skip questions with blank choices
+      if (q.optionA.isBlank() && q.optionB.isBlank()) return
+      val normText = textClean.lowercase()
+      if (q.id !in seenIds && normText !in seenTexts) {
+        seenIds.add(q.id)
+        seenTexts.add(normText)
+        result.add(q)
+      }
+    }
+
+    // 1. Direct examId match from DB Question_Bank
+    _questions.value.filter { it.examId.equals(exam.id, ignoreCase = true) }.forEach { addIfValid(it) }
+
+    // 2. Specific question IDs linked in exam row
+    if (!exam.questionIds.isNullOrBlank()) {
+      val ids = exam.questionIds.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+      _questions.value.filter { it.id in ids }.forEach { addIfValid(it) }
+    }
+
+    // 3. Questions matching this exam's course from DB Question_Bank
+    if (!exam.courseId.isNullOrBlank()) {
+      _questions.value.filter { it.courseId.equals(exam.courseId, ignoreCase = true) }.forEach { addIfValid(it) }
+    }
+
+    // 4. Any other relevant questions in DB
+    if (result.size < 5) {
+      _questions.value.forEach { addIfValid(it) }
+    }
+
+    // 5. Augment with official syllabus / curriculum question bank to provide a full 10-15 question CBT test
+    val standardQuestions = com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
+    for (q in standardQuestions) {
+      if (result.size >= 12) break
+      addIfValid(q)
+    }
+
+    if (result.isEmpty()) {
+      return standardQuestions
+    }
+
+    return result
   }
 
   fun updateStudentTelemetry(telemetry: StudentTelemetry) {

@@ -21,7 +21,24 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+      if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+      }
+    }
+
     val repository = PathsalaRepository.getInstance(applicationContext)
+
+    // Eagerly restore notification on launch if student already logged in
+    repository.currentStudent.value?.let { st ->
+      com.example.util.NotificationHelper.syncStudentClassNotification(
+        context = applicationContext,
+        student = st,
+        liveClasses = repository.liveClasses.value,
+        batches = repository.batches.value
+      )
+    }
 
     setContent {
       val isDarkMode by repository.isDarkMode.collectAsState()
@@ -33,6 +50,21 @@ class MainActivity : ComponentActivity() {
           var showSplash by remember { mutableStateOf(true) }
           val currentStudent by repository.currentStudent.collectAsState()
           val currentAdmin by repository.currentAdmin.collectAsState()
+
+          val liveClasses by repository.liveClasses.collectAsState()
+          val batches by repository.batches.collectAsState()
+
+          LaunchedEffect(currentStudent, liveClasses, batches) {
+            val st = currentStudent
+            if (st != null) {
+              com.example.util.NotificationHelper.syncStudentClassNotification(
+                context = applicationContext,
+                student = st,
+                liveClasses = liveClasses,
+                batches = batches
+              )
+            }
+          }
 
           if (showSplash) {
             OpeningLogoScreen(
@@ -46,7 +78,10 @@ class MainActivity : ComponentActivity() {
             StudentMainScreen(
               student = currentStudent!!,
               repository = repository,
-              onLogout = { repository.logoutStudent() }
+              onLogout = {
+                com.example.util.NotificationHelper.cancelPersistentClassNotification(applicationContext)
+                repository.logoutStudent()
+              }
             )
           } else if (currentAdmin != null) {
             BackHandler {
@@ -67,6 +102,19 @@ class MainActivity : ComponentActivity() {
           }
         }
       }
+    }
+  }
+
+  override fun onStop() {
+    super.onStop()
+    val repository = PathsalaRepository.getInstance(applicationContext)
+    repository.currentStudent.value?.let { st ->
+      com.example.util.NotificationHelper.syncStudentClassNotification(
+        context = applicationContext,
+        student = st,
+        liveClasses = repository.liveClasses.value,
+        batches = repository.batches.value
+      )
     }
   }
 }

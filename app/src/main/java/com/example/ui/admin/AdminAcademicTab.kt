@@ -61,8 +61,12 @@ fun AdminAcademicTab(
   var postponeReasonText by remember { mutableStateOf("") }
   var notifConfirmationSession by remember { mutableStateOf<LiveClassSession?>(null) }
 
-  val automatedSchedule = remember(batches, courses, liveClasses, selectedBatchFilter) {
-    com.example.util.BatchScheduleHelper.getAllBatchesAutomatedSchedule(batches, courses, liveClasses, selectedBatchFilter)
+  val displayedClasses = remember(liveClasses, selectedBatchFilter) {
+    if (selectedBatchFilter == null) {
+      liveClasses
+    } else {
+      liveClasses.filter { it.batchId == selectedBatchFilter }
+    }
   }
 
   val context = LocalContext.current
@@ -124,8 +128,8 @@ fun AdminAcademicTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column {
-              Text(text = "Automated Class Schedule", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
-              Text(text = "Synced as per batch timetable & calendar routine", fontSize = 12.sp, color = Slate600)
+              Text(text = "Scheduled Classes (Database)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
+              Text(text = "Real-time records synced directly with Google Sheet database", fontSize = 12.sp, color = Slate600)
             }
             Button(
               onClick = { showAddClassDialog = true },
@@ -150,19 +154,20 @@ fun AdminAcademicTab(
             FilterChip(
               selected = selectedBatchFilter == null,
               onClick = { selectedBatchFilter = null },
-              label = { Text("All Batches (${automatedSchedule.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+              label = { Text("All Batches (${displayedClasses.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
             )
             batches.forEach { b ->
+              val count = liveClasses.count { it.batchId == b.id }
               FilterChip(
                 selected = selectedBatchFilter == b.id,
                 onClick = { selectedBatchFilter = if (selectedBatchFilter == b.id) null else b.id },
-                label = { Text("${b.name} (${b.scheduleDays})", fontSize = 11.sp) }
+                label = { Text("${b.name} ($count)", fontSize = 11.sp) }
               )
             }
           }
         }
 
-        if (automatedSchedule.isEmpty()) {
+        if (displayedClasses.isEmpty()) {
           item {
             Card(
               shape = RoundedCornerShape(12.dp),
@@ -177,13 +182,13 @@ fun AdminAcademicTab(
               ) {
                 Icon(Icons.Default.EventBusy, contentDescription = null, tint = Slate400, modifier = Modifier.size(40.dp))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("No upcoming classes scheduled for this batch.", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Slate700)
-                Text("Classes are automatically generated as per batch schedule days & timings.", fontSize = 12.sp, color = Slate500)
+                Text("No scheduled classes in database for this batch.", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Slate700)
+                Text("Click '+ Add Class' above to schedule and sync with Google Sheets.", fontSize = 12.sp, color = Slate500)
               }
             }
           }
         } else {
-          items(automatedSchedule) { session ->
+          items(displayedClasses) { session ->
             val course = courses.firstOrNull { it.id == session.courseId }
             val batch = batches.firstOrNull { it.id == session.batchId }
 

@@ -52,8 +52,8 @@ fun ExamWebPlayerDialog(
   repository: PathsalaRepository,
   onDismiss: () -> Unit
 ) {
-  val context = LocalContext.current
-  val questions = remember(exam.id) { repository.getQuestionsForExam(exam) }
+  val allQuestions by repository.questions.collectAsState()
+  val questions = remember(exam.id, allQuestions) { repository.getQuestionsForExam(exam) }
   var showConfirmExit by remember { mutableStateOf(false) }
 
   val questionsJson = remember(questions) {
@@ -82,6 +82,8 @@ fun ExamWebPlayerDialog(
       durationMinutes = exam.durationMinutes
     )
   }
+
+  var webViewKey by remember { mutableStateOf(0) }
 
   Dialog(
     onDismissRequest = { showConfirmExit = true },
@@ -120,41 +122,68 @@ fun ExamWebPlayerDialog(
           .padding(padding)
           .background(Color(0xFF0F172A))
       ) {
-        AndroidView(
-          factory = { ctx ->
-            WebView(ctx).apply {
-              settings.javaScriptEnabled = true
-              settings.domStorageEnabled = true
-              settings.loadWithOverviewMode = true
-              settings.useWideViewPort = true
-              settings.cacheMode = WebSettings.LOAD_NO_CACHE
-              webViewClient = WebViewClient()
+        key(webViewKey) {
+          AndroidView(
+            factory = { ctx ->
+              WebView(ctx).apply {
+                setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+                settings.apply {
+                  javaScriptEnabled = true
+                  domStorageEnabled = true
+                  loadWithOverviewMode = true
+                  useWideViewPort = true
+                  cacheMode = WebSettings.LOAD_NO_CACHE
+                  allowFileAccess = false
+                  allowContentAccess = false
+                }
 
-              addJavascriptInterface(
-                ExamWebBridge { score, totalMarks ->
-                  val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
-                  val submission = ExamSubmission(
-                    id = "sub-${System.currentTimeMillis()}",
-                    examId = exam.id,
-                    studentId = student.id,
-                    studentName = student.name,
-                    score = score,
-                    totalMarks = totalMarks,
-                    submittedAt = sdf.format(Date())
-                  )
-                  repository.submitExamSubmission(submission)
-                  post {
-                    Toast.makeText(ctx, "Exam Completed! Score: $score / $totalMarks", Toast.LENGTH_LONG).show()
+                webViewClient = object : WebViewClient() {
+                  override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
+                    try {
+                      (view?.parent as? android.view.ViewGroup)?.removeView(view)
+                      view?.destroy()
+                    } catch (_: Exception) {}
+                    webViewKey++
+                    return true
                   }
-                },
-                "AndroidExamBridge"
-              )
+                }
 
-              loadDataWithBaseURL("https://pixelpathsala.local/", examHtml, "text/html", "UTF-8", null)
-            }
-          },
-          modifier = Modifier.fillMaxSize()
-        )
+                addJavascriptInterface(
+                  ExamWebBridge { score, totalMarks ->
+                    val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
+                    val submission = ExamSubmission(
+                      id = "sub-${System.currentTimeMillis()}",
+                      examId = exam.id,
+                      studentId = student.id,
+                      studentName = student.name,
+                      score = score,
+                      totalMarks = totalMarks,
+                      submittedAt = sdf.format(Date())
+                    )
+                    repository.submitExamSubmission(submission)
+                    post {
+                      Toast.makeText(ctx, "Exam Completed! Score: $score / $totalMarks", Toast.LENGTH_LONG).show()
+                    }
+                  },
+                  "AndroidExamBridge"
+                )
+
+                loadDataWithBaseURL("https://exam.pixelpathsala.local/", examHtml, "text/html; charset=utf-8", "UTF-8", null)
+              }
+            },
+            onRelease = { webView ->
+              try {
+                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+                webView.stopLoading()
+                webView.onPause()
+                webView.clearHistory()
+                webView.removeAllViews()
+                webView.destroy()
+              } catch (_: Exception) {}
+            },
+            modifier = Modifier.fillMaxSize()
+          )
+        }
       }
     }
   }
@@ -686,7 +715,20 @@ fun generateExamWebProjectHtml(
       });
     }
 
-    window.onload = initExam;
+    let examInitialized = false;
+    function safeInitExam() {
+      if (examInitialized) return;
+      examInitialized = true;
+      initExam();
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(safeInitExam, 20);
+    } else {
+      document.addEventListener('DOMContentLoaded', safeInitExam);
+      window.addEventListener('load', safeInitExam);
+      setTimeout(safeInitExam, 150);
+    }
   </script>
 </body>
 </html>

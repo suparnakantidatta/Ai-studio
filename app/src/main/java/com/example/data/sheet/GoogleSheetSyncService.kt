@@ -171,9 +171,11 @@ class GoogleSheetSyncService {
         put("date", session.scheduledDate)
         put("startTime", session.startTime)
         put("endTime", session.endTime)
-        put("status", session.status)
+        put("status", if (session.isPostponed) "postponed" else session.status)
         put("platform", session.platform)
         put("meetingUrl", session.meetingUrl ?: "")
+        put("isPostponed", session.isPostponed)
+        put("postponeReason", session.postponeReason ?: "")
       }
       postJson(json)
     } catch (e: Exception) {
@@ -457,7 +459,7 @@ class GoogleSheetSyncService {
       val row = JSONArray().apply {
         put(s.id)
         put(s.title)
-        put("Class 11")
+        put(s.academicClass ?: "Class 11")
         put(s.subject)
         put(s.courseId ?: "")
         put(s.batchId ?: "")
@@ -465,10 +467,10 @@ class GoogleSheetSyncService {
         put(s.scheduledDate)
         put(s.startTime)
         put(s.endTime)
-        put(s.status)
+        put(if (s.isPostponed) "postponed" else s.status)
         put(s.platform)
         put(s.meetingUrl ?: "")
-        put("No")
+        put(if (s.isPostponed) (s.postponeReason ?: "Postponed by center administration") else "No")
         put("2026-07-01")
       }
       arr.put(row)
@@ -1040,6 +1042,17 @@ class GoogleSheetSyncService {
       val id = optCell(row, 0)
       val title = optCell(row, 1)
       if (id.isBlank() || title.isBlank()) continue
+      val rawStatus = optCell(row, 10).ifBlank { "scheduled" }
+      val isPostp = rawStatus.equals("postponed", ignoreCase = true)
+      val recOrNotice = optCell(row, 13)
+      val postponeReason = if (isPostp) {
+        if (recOrNotice.isNotBlank() && !recOrNotice.equals("No", ignoreCase = true) && !recOrNotice.equals("Yes", ignoreCase = true)) {
+          recOrNotice
+        } else {
+          "Postponed by center administration"
+        }
+      } else null
+
       list.add(
         LiveClassSession(
           id = id,
@@ -1052,9 +1065,11 @@ class GoogleSheetSyncService {
           scheduledDate = cleanDateOrTime(optCell(row, 7)),
           startTime = cleanDateOrTime(optCell(row, 8)).ifBlank { "10:00 AM" },
           endTime = cleanDateOrTime(optCell(row, 9)).ifBlank { "11:30 AM" },
-          status = optCell(row, 10).ifBlank { "scheduled" },
+          status = rawStatus,
           platform = optCell(row, 11).ifBlank { "Google Meet" },
-          meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" }
+          meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" },
+          isPostponed = isPostp,
+          postponeReason = postponeReason
         )
       )
     }
@@ -1131,6 +1146,7 @@ class GoogleSheetSyncService {
       val status = optCell(row, 11).ifBlank { optCell(row, 7).ifBlank { "published" } }
       val rawDate = optCell(row, 13).ifBlank { optCell(row, 6) }
       val schedDate = cleanDateOrTime(rawDate)
+      val qIds = optCell(row, 17).ifBlank { null }
 
       list.add(
         OnlineExam(
@@ -1142,7 +1158,8 @@ class GoogleSheetSyncService {
           totalMarks = totalMarks,
           durationMinutes = duration,
           scheduledDate = schedDate,
-          status = status
+          status = status,
+          questionIds = qIds
         )
       )
     }
@@ -1155,19 +1172,69 @@ class GoogleSheetSyncService {
     for (i in 1 until arr.length()) {
       val row = arr.optJSONArray(i) ?: continue
       val id = optCell(row, 0)
-      val qText = optCell(row, 2)
-      if (id.isBlank() || qText.isBlank()) continue
+      if (id.isBlank()) continue
+
+      // Support both Google Sheets Question_Bank format:
+      // Index 0: Question ID, 1: Course ID, 2: Academic Class, 3: Subject, 4: Topic, 5: Marks,
+      // 7: Question Text, 8: Option A, 9: Option B, 10: Option C, 11: Option D, 12: Correct Option Index
+      // and legacy format (Index 1: Exam ID, 2: Question Text, 3..6: Options, 7: Correct, 8: Marks)
+      val isQuestionBankSchema = row.length() >= 12 && (optCell(row, 7).isNotBlank() || optCell(row, 8).isNotBlank())
+
+      val courseId: String?
+      val examId: String
+      val qText: String
+      val optA: String
+      val optB: String
+      val optC: String
+      val optD: String
+      val correctOpt: String
+      val marks: Int
+
+      if (isQuestionBankSchema) {
+        val courseVal = optCell(row, 1)
+        courseId = courseVal.ifBlank { null }
+        examId = optCell(row, 14).ifBlank { optCell(row, 4) }
+        marks = optCell(row, 5).toIntOrNull() ?: 2
+        val rawText = optCell(row, 7)
+        val snippet = optCell(row, 13)
+        qText = if (snippet.isNotBlank()) "$rawText\n\n$snippet" else rawText
+        optA = optCell(row, 8)
+        optB = optCell(row, 9)
+        optC = optCell(row, 10)
+        optD = optCell(row, 11)
+        val rawCorrect = optCell(row, 12).trim()
+        correctOpt = when (rawCorrect) {
+          "0" -> "A"
+          "1" -> "B"
+          "2" -> "C"
+          "3" -> "D"
+          else -> if (rawCorrect.isNotBlank()) rawCorrect.uppercase() else "A"
+        }
+      } else {
+        courseId = null
+        examId = optCell(row, 1)
+        qText = optCell(row, 2)
+        optA = optCell(row, 3)
+        optB = optCell(row, 4)
+        optC = optCell(row, 5)
+        optD = optCell(row, 6)
+        correctOpt = optCell(row, 7).ifBlank { "A" }.uppercase()
+        marks = optCell(row, 8).toIntOrNull() ?: 1
+      }
+
+      if (qText.isBlank()) continue
       list.add(
         ExamQuestion(
           id = id,
-          examId = optCell(row, 1),
+          examId = examId,
           questionText = qText,
-          optionA = optCell(row, 3),
-          optionB = optCell(row, 4),
-          optionC = optCell(row, 5),
-          optionD = optCell(row, 6),
-          correctOption = optCell(row, 7).ifBlank { "A" },
-          marks = optCell(row, 8).toIntOrNull() ?: 1
+          optionA = optA,
+          optionB = optB,
+          optionC = optC,
+          optionD = optD,
+          correctOption = correctOpt,
+          marks = marks,
+          courseId = courseId
         )
       )
     }

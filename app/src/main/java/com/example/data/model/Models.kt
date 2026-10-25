@@ -198,7 +198,8 @@ data class ExamQuestion(
   val optionC: String,
   val optionD: String,
   val correctOption: String = "A",
-  val marks: Int = 1
+  val marks: Int = 1,
+  val courseId: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -211,7 +212,8 @@ data class OnlineExam(
   val totalMarks: Int = 20,
   val durationMinutes: Int = 30,
   val scheduledDate: String = "",
-  val status: String = "published"
+  val status: String = "published",
+  val questionIds: String? = null
 )
 
 @JsonClass(generateAdapter = true)
