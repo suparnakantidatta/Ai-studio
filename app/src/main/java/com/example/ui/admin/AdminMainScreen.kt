@@ -272,6 +272,9 @@ fun AdminMainScreen(
           onTogglePostpone = { sessionId, isPostponed, reason ->
             repository.togglePostponeClass(sessionId, isPostponed, reason)
           },
+          onRescheduleClass = { sessionId, newDate, newStartTime, newEndTime, reason ->
+            repository.rescheduleClass(sessionId, newDate, newStartTime, newEndTime, reason)
+          },
           onSendNotification = { session ->
             repository.markClassNotificationSent(session.id)
           }

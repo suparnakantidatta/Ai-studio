@@ -46,7 +46,7 @@ fun triggerClassAlarm(context: Context, session: LiveClassSession, skipUi: Boole
 }
 
 fun triggerBatchAlarm(context: Context, batch: Batch, course: Course?, skipUi: Boolean = true, showToast: Boolean = false) {
-  com.example.util.InAppAlarmScheduler.scheduleBatchAlarm(context, batch, showToast = showToast)
+  // Alarms are set only for explicitly scheduled classes, not general batch timetables
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

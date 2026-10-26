@@ -83,7 +83,7 @@ fun ExamWebPlayerDialog(
     )
   }
 
-  var webViewKey by remember { mutableStateOf(0) }
+  var hasRendererError by remember { mutableStateOf(false) }
 
   Dialog(
     onDismissRequest = { showConfirmExit = true },
@@ -122,11 +122,31 @@ fun ExamWebPlayerDialog(
           .padding(padding)
           .background(Color(0xFF0F172A))
       ) {
-        key(webViewKey) {
+        if (hasRendererError) {
+          Column(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+          ) {
+            Text("📝 Assessment Portal", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Session state preserved. Tap to resume your test.", color = Color(0xFF94A3B8), fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+              onClick = { hasRendererError = false },
+              colors = ButtonDefaults.buttonColors(containerColor = BrandSecondary),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Text("Resume Exam", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+          }
+        } else {
           AndroidView(
             factory = { ctx ->
               WebView(ctx).apply {
-                setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                 settings.apply {
                   javaScriptEnabled = true
                   domStorageEnabled = true
@@ -135,15 +155,21 @@ fun ExamWebPlayerDialog(
                   cacheMode = WebSettings.LOAD_NO_CACHE
                   allowFileAccess = false
                   allowContentAccess = false
+                  databaseEnabled = false
+                  setGeolocationEnabled(false)
+                  offscreenPreRaster = false
+                  mediaPlaybackRequiresUserGesture = true
                 }
 
                 webViewClient = object : WebViewClient() {
                   override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
-                    try {
-                      (view?.parent as? android.view.ViewGroup)?.removeView(view)
-                      view?.destroy()
-                    } catch (_: Exception) {}
-                    webViewKey++
+                    post {
+                      try {
+                        (view?.parent as? android.view.ViewGroup)?.removeView(view)
+                        view?.destroy()
+                      } catch (_: Exception) {}
+                    }
+                    hasRendererError = true
                     return true
                   }
                 }
@@ -173,9 +199,10 @@ fun ExamWebPlayerDialog(
             },
             onRelease = { webView ->
               try {
-                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
                 webView.stopLoading()
+                webView.loadUrl("about:blank")
                 webView.onPause()
+                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
                 webView.clearHistory()
                 webView.removeAllViews()
                 webView.destroy()
@@ -219,6 +246,7 @@ fun generateExamWebProjectHtml(
   questionsJson: String,
   durationMinutes: Int
 ): String {
+  val safeEncodedQuestions = java.net.URLEncoder.encode(questionsJson, "UTF-8")
   return """
 <!DOCTYPE html>
 <html lang="en">
@@ -507,7 +535,12 @@ fun generateExamWebProjectHtml(
   </div>
 
   <script>
-    const questions = $questionsJson;
+    let questions = [];
+    try {
+      questions = JSON.parse(decodeURIComponent("$safeEncodedQuestions"));
+    } catch(e) {
+      console.error("Error parsing exam questions:", e);
+    }
     let currentIndex = 0;
     const userAnswers = {}; // qId -> 'A' | 'B' | 'C' | 'D'
     const reviewStatus = {}; // qId -> bool

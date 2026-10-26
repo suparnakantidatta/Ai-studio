@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-class PathsalaRepository private constructor(context: Context) {
+class PathsalaRepository private constructor(private val context: Context) {
 
   private val localStore = LocalDataStore(context)
   private val sheetService = GoogleSheetSyncService()
@@ -582,10 +582,8 @@ class PathsalaRepository private constructor(context: Context) {
 
     fun addIfValid(q: ExamQuestion) {
       val textClean = q.questionText.trim()
-      // Skip empty or garbage questions
-      if (textClean.isBlank() || textClean.length < 3) return
-      // Skip questions with blank choices
-      if (q.optionA.isBlank() && q.optionB.isBlank()) return
+      // Skip only completely blank questions
+      if (textClean.isBlank()) return
       val normText = textClean.lowercase()
       if (q.id !in seenIds && normText !in seenTexts) {
         seenIds.add(q.id)
@@ -597,9 +595,9 @@ class PathsalaRepository private constructor(context: Context) {
     // 1. Direct examId match from DB Question_Bank
     _questions.value.filter { it.examId.equals(exam.id, ignoreCase = true) }.forEach { addIfValid(it) }
 
-    // 2. Specific question IDs linked in exam row
+    // 2. Specific question IDs linked in exam row (e.g., 'q-1790696496989-957')
     if (!exam.questionIds.isNullOrBlank()) {
-      val ids = exam.questionIds.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+      val ids = exam.questionIds.split(",", ";", " ").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
       _questions.value.filter { it.id in ids }.forEach { addIfValid(it) }
     }
 
@@ -608,20 +606,20 @@ class PathsalaRepository private constructor(context: Context) {
       _questions.value.filter { it.courseId.equals(exam.courseId, ignoreCase = true) }.forEach { addIfValid(it) }
     }
 
-    // 4. Any other relevant questions in DB
-    if (result.size < 5) {
-      _questions.value.forEach { addIfValid(it) }
-    }
+    // 4. Any other questions in DB Question_Bank
+    _questions.value.forEach { addIfValid(it) }
 
-    // 5. Augment with official syllabus / curriculum question bank to provide a full 10-15 question CBT test
-    val standardQuestions = com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
-    for (q in standardQuestions) {
-      if (result.size >= 12) break
-      addIfValid(q)
+    // 5. Augment with syllabus curriculum question bank only if fewer than 5 questions
+    if (result.size < 5) {
+      val standardQuestions = com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
+      for (q in standardQuestions) {
+        if (result.size >= 12) break
+        addIfValid(q)
+      }
     }
 
     if (result.isEmpty()) {
-      return standardQuestions
+      return com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
     }
 
     return result
@@ -671,6 +669,9 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _liveClasses.value + session
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
+    if (!session.isPostponed) {
+      com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, session, showToast = false)
+    }
     scope.launch {
       sheetService.pushLiveClass(session)
       sheetService.syncLiveClasses(_liveClasses.value)
@@ -686,6 +687,13 @@ class PathsalaRepository private constructor(context: Context) {
     }
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
+
+    if (session.isPostponed) {
+      com.example.util.InAppAlarmScheduler.cancelClassAlarm(context, session.id)
+    } else {
+      com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, session, showToast = false)
+    }
+
     scope.launch {
       sheetService.pushLiveClass(session)
       sheetService.syncLiveClasses(_liveClasses.value)
@@ -696,6 +704,7 @@ class PathsalaRepository private constructor(context: Context) {
     val updated = _liveClasses.value.filterNot { it.id == sessionId }
     _liveClasses.value = updated
     localStore.saveLiveClasses(updated)
+    com.example.util.InAppAlarmScheduler.cancelClassAlarm(context, sessionId)
     scope.launch {
       sheetService.syncLiveClasses(_liveClasses.value)
     }
@@ -707,9 +716,57 @@ class PathsalaRepository private constructor(context: Context) {
       val updatedSession = existing.copy(
         isPostponed = isPostponed,
         status = if (isPostponed) "postponed" else "scheduled",
-        postponeReason = if (isPostponed) (reason ?: "Class postponed by faculty") else null
+        postponeReason = if (isPostponed) (reason ?: "Class postponed by faculty") else null,
+        notificationSent = false
       )
-      updateLiveClass(updatedSession)
+      val updated = _liveClasses.value.map { if (it.id == sessionId) updatedSession else it }
+      _liveClasses.value = updated
+      localStore.saveLiveClasses(updated)
+
+      if (isPostponed) {
+        // Cancel alarm immediately if class is postponed
+        com.example.util.InAppAlarmScheduler.cancelClassAlarm(context, sessionId)
+      } else {
+        // Restore alarm for active schedule
+        com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, updatedSession, showToast = false)
+      }
+
+      scope.launch {
+        sheetService.postponeClass(sessionId, isPostponed, updatedSession.postponeReason)
+        sheetService.syncLiveClasses(_liveClasses.value)
+      }
+    }
+  }
+
+  fun rescheduleClass(
+    sessionId: String,
+    newDate: String,
+    newStartTime: String,
+    newEndTime: String,
+    reason: String? = null
+  ) {
+    val existing = _liveClasses.value.firstOrNull { it.id == sessionId }
+    if (existing != null) {
+      val updatedSession = existing.copy(
+        scheduledDate = newDate,
+        startTime = newStartTime,
+        endTime = newEndTime,
+        status = "scheduled",
+        isPostponed = false,
+        postponeReason = null,
+        notificationSent = false
+      )
+      val updated = _liveClasses.value.map { if (it.id == sessionId) updatedSession else it }
+      _liveClasses.value = updated
+      localStore.saveLiveClasses(updated)
+
+      // Set alarm 30 minutes before newly scheduled class time
+      com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, updatedSession, showToast = false)
+
+      scope.launch {
+        sheetService.rescheduleClass(sessionId, newDate, newStartTime, newEndTime, reason)
+        sheetService.syncLiveClasses(_liveClasses.value)
+      }
     }
   }
 

@@ -92,6 +92,10 @@ object NotificationHelper {
     } catch (_: Exception) {}
   }
 
+  private const val PREFS_NOTIF = "pathsala_notif_prefs"
+  private const val KEY_LAST_NOTIFIED_PREFIX = "last_notified_event_"
+  const val CLASS_NOTIF_ID = 8801
+
   fun sendClassAlarmSystemNotification(
     context: Context,
     title: String,
@@ -117,11 +121,11 @@ object NotificationHelper {
       val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
-      val contentMsg = "Class is starting now ($time). Subject: $subject. Tap to attend session."
+      val contentMsg = "Class is starting in 30 minutes ($time). Subject: $subject. Tap to attend."
 
       val builder = NotificationCompat.Builder(context, CHANNEL_CLASS_ALERTS)
         .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-        .setContentTitle("🔔 Class Alarm: $title")
+        .setContentTitle("🔔 Class in 30 Minutes: $title")
         .setContentText(contentMsg)
         .setStyle(NotificationCompat.BigTextStyle().bigText(contentMsg))
         .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -130,6 +134,7 @@ object NotificationHelper {
         .setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
         .setContentIntent(pendingIntent)
         .setAutoCancel(true)
+        .setOngoing(false)
 
       val notificationManager = NotificationManagerCompat.from(context)
       try {
@@ -138,9 +143,7 @@ object NotificationHelper {
     } catch (_: Exception) {}
   }
 
-  const val PERSISTENT_CLASS_NOTIF_ID = 8801
-
-  fun showPersistentClassNotification(
+  fun showClassNotification(
     context: Context,
     title: String,
     scheduledDate: String,
@@ -160,19 +163,16 @@ object NotificationHelper {
 
       val pendingIntent = PendingIntent.getActivity(
         context,
-        PERSISTENT_CLASS_NOTIF_ID,
+        CLASS_NOTIF_ID,
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
       )
-
-      val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
 
       val notifTitle = if (isPostponed) "⚠️ Class Postponed: $title" else "📅 Class Scheduled: $title"
       val notifBody = if (isPostponed) {
         "Notice: ${postponeReason ?: "Session postponed by center faculty"}. Timings: $startTime. Tap for updates."
       } else {
-        "Class active on $scheduledDate at $startTime ($subject - ${batchName ?: "Regular"}). Tap to open."
+        "Class scheduled on $scheduledDate at $startTime ($subject - ${batchName ?: "Regular"}). Tap to open."
       }
 
       val builder = NotificationCompat.Builder(context, CHANNEL_CLASS_ALERTS)
@@ -184,22 +184,44 @@ object NotificationHelper {
         .setColorized(true)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         .setShowWhen(true)
-        .setPriority(NotificationCompat.PRIORITY_MAX)
-        .setCategory(NotificationCompat.CATEGORY_STATUS)
-        .setOngoing(true)
-        .setAutoCancel(false)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setCategory(NotificationCompat.CATEGORY_EVENT)
+        .setOngoing(false)
+        .setAutoCancel(true)
         .setContentIntent(pendingIntent)
-
-      try {
-        val ringtone = RingtoneManager.getRingtone(context, alarmSound)
-        ringtone?.play()
-      } catch (_: Exception) {}
 
       val notificationManager = NotificationManagerCompat.from(context)
       try {
-        notificationManager.notify(PERSISTENT_CLASS_NOTIF_ID, builder.build())
+        notificationManager.notify(CLASS_NOTIF_ID, builder.build())
       } catch (_: SecurityException) {}
     } catch (_: Exception) {}
+  }
+
+  fun notifyClassEventOnce(
+    context: Context,
+    session: com.example.data.model.LiveClassSession,
+    batchName: String? = null
+  ) {
+    val isPostponed = session.isPostponed || session.status.equals("postponed", ignoreCase = true)
+    val eventKey = "${session.id}_${if (isPostponed) "postponed" else "scheduled"}_${session.scheduledDate}_${session.startTime}_${session.postponeReason ?: ""}"
+    val prefs = context.getSharedPreferences(PREFS_NOTIF, Context.MODE_PRIVATE)
+    val prev = prefs.getString(KEY_LAST_NOTIFIED_PREFIX + session.id, null)
+    if (prev == eventKey) {
+      // Already notified once for this state
+      return
+    }
+    prefs.edit().putString(KEY_LAST_NOTIFIED_PREFIX + session.id, eventKey).apply()
+
+    showClassNotification(
+      context = context,
+      title = session.title,
+      scheduledDate = session.scheduledDate,
+      startTime = session.startTime,
+      subject = session.subject,
+      batchName = batchName ?: session.academicClass,
+      isPostponed = isPostponed,
+      postponeReason = session.postponeReason
+    )
   }
 
   fun syncStudentClassNotification(
@@ -220,40 +242,19 @@ object NotificationHelper {
       }
     }
 
+    // Only notify if there is an explicit scheduled or postponed class session
     val targetClass = relevantClasses.firstOrNull { it.isPostponed || it.status.equals("postponed", ignoreCase = true) }
-      ?: relevantClasses.firstOrNull { it.status.equals("scheduled", ignoreCase = true) || it.status.equals("live", ignoreCase = true) }
-      ?: liveClasses.firstOrNull { it.isPostponed || it.status.equals("postponed", ignoreCase = true) }
-      ?: liveClasses.firstOrNull { it.status.equals("scheduled", ignoreCase = true) || it.status.equals("live", ignoreCase = true) }
+      ?: relevantClasses.firstOrNull { it.status.equals("scheduled", ignoreCase = true) }
 
     if (targetClass != null) {
-      val isPostponed = targetClass.isPostponed || targetClass.status.equals("postponed", ignoreCase = true)
-      showPersistentClassNotification(
-        context = context,
-        title = targetClass.title,
-        scheduledDate = targetClass.scheduledDate,
-        startTime = targetClass.startTime,
-        subject = targetClass.subject,
-        batchName = studentBatch?.name ?: targetClass.academicClass,
-        isPostponed = isPostponed,
-        postponeReason = targetClass.postponeReason
-      )
-    } else {
-      showPersistentClassNotification(
-        context = context,
-        title = "Batch: ${studentBatch?.name ?: "Regular Academic"}",
-        scheduledDate = studentBatch?.scheduleDays ?: "Regular Timetable",
-        startTime = studentBatch?.timings ?: "10:00 AM",
-        subject = "Pixel Pathsala Academic Portal",
-        batchName = studentBatch?.name,
-        isPostponed = false
-      )
+      notifyClassEventOnce(context, targetClass, studentBatch?.name)
     }
   }
 
   fun cancelPersistentClassNotification(context: Context) {
     try {
       val notificationManager = NotificationManagerCompat.from(context)
-      notificationManager.cancel(PERSISTENT_CLASS_NOTIF_ID)
+      notificationManager.cancel(CLASS_NOTIF_ID)
     } catch (_: Exception) {}
   }
 

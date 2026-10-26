@@ -22,6 +22,15 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
 
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+      val processName = android.app.Application.getProcessName()
+      if (packageName != processName) {
+        try {
+          android.webkit.WebView.setDataDirectorySuffix(processName)
+        } catch (_: Exception) {}
+      }
+    }
+
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
       if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
         requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
@@ -57,12 +66,32 @@ class MainActivity : ComponentActivity() {
           LaunchedEffect(currentStudent, liveClasses, batches) {
             val st = currentStudent
             if (st != null) {
+              // Notify once if there is a new scheduled or postponed class
               com.example.util.NotificationHelper.syncStudentClassNotification(
                 context = applicationContext,
                 student = st,
                 liveClasses = liveClasses,
                 batches = batches
               )
+
+              // Automatically maintain 30-min alarms for student's explicitly scheduled classes
+              liveClasses.forEach { session ->
+                val sessBatch = session.batchId?.trim() ?: ""
+                val sessCourse = session.courseId?.trim() ?: ""
+                val isRelevant = when {
+                  sessBatch.isNotEmpty() && !sessBatch.equals("all", ignoreCase = true) -> sessBatch == st.batchId
+                  sessBatch.equals("all", ignoreCase = true) -> sessCourse.isEmpty() || sessCourse == st.courseId
+                  sessCourse.isNotEmpty() -> sessCourse == st.courseId
+                  else -> true
+                }
+                if (isRelevant) {
+                  if (session.isPostponed || session.status.equals("postponed", ignoreCase = true)) {
+                    com.example.util.InAppAlarmScheduler.cancelClassAlarm(applicationContext, session.id)
+                  } else if (session.status.equals("scheduled", ignoreCase = true)) {
+                    com.example.util.InAppAlarmScheduler.scheduleClassAlarm(applicationContext, session, showToast = false)
+                  }
+                }
+              }
             }
           }
 
@@ -107,14 +136,5 @@ class MainActivity : ComponentActivity() {
 
   override fun onStop() {
     super.onStop()
-    val repository = PathsalaRepository.getInstance(applicationContext)
-    repository.currentStudent.value?.let { st ->
-      com.example.util.NotificationHelper.syncStudentClassNotification(
-        context = applicationContext,
-        student = st,
-        liveClasses = repository.liveClasses.value,
-        batches = repository.batches.value
-      )
-    }
   }
 }

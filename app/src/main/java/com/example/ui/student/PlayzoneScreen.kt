@@ -12,25 +12,46 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun PlayzoneScreen() {
   val playzoneHtml = remember { getPlayzoneWebAppHtml() }
-  var webViewKey by remember { mutableStateOf(0) }
+  var hasRendererError by remember { mutableStateOf(false) }
 
   Box(
     modifier = Modifier
       .fillMaxSize()
       .background(Color(0xFF0B1120))
   ) {
-    key(webViewKey) {
+    if (hasRendererError) {
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(24.dp),
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+      ) {
+        Text("⚡ Playzone IDE", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Workspace memory refreshed. Tap to reopen.", color = Color(0xFF94A3B8), fontSize = 13.sp)
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+          onClick = { hasRendererError = false },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+          shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        ) {
+          Text("Open Workspace", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
+        }
+      }
+    } else {
       AndroidView(
         factory = { ctx ->
           WebView(ctx).apply {
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             settings.apply {
               javaScriptEnabled = true
               domStorageEnabled = true
@@ -39,16 +60,21 @@ fun PlayzoneScreen() {
               cacheMode = WebSettings.LOAD_NO_CACHE
               allowFileAccess = false
               allowContentAccess = false
+              databaseEnabled = false
+              setGeolocationEnabled(false)
+              offscreenPreRaster = false
+              mediaPlaybackRequiresUserGesture = true
             }
 
             webViewClient = object : WebViewClient() {
               override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
-                // Return true to prevent app crash, detach and destroy dead WebView, and trigger fresh recreation
-                try {
-                  (view?.parent as? android.view.ViewGroup)?.removeView(view)
-                  view?.destroy()
-                } catch (_: Exception) {}
-                webViewKey++
+                post {
+                  try {
+                    (view?.parent as? android.view.ViewGroup)?.removeView(view)
+                    view?.destroy()
+                  } catch (_: Exception) {}
+                }
+                hasRendererError = true
                 return true
               }
             }
@@ -58,9 +84,10 @@ fun PlayzoneScreen() {
         },
         onRelease = { webView ->
           try {
-            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
             webView.stopLoading()
+            webView.loadUrl("about:blank")
             webView.onPause()
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
             webView.clearHistory()
             webView.removeAllViews()
             webView.destroy()
@@ -244,11 +271,15 @@ fun getPlayzoneWebAppHtml(): String {
     .console-output .out-error { color: #f87171; font-weight: 600; }
     .console-output .out-info { color: #38bdf8; }
 
-    /* Web Preview Iframe for HTML */
+    /* Web Preview Container for HTML (Isolated Sandboxed iframe) */
     #htmlPreviewFrame {
       flex: 1;
-      background: #ffffff;
-      border: none;
+      width: 100%;
+      height: 100%;
+      min-height: 200px;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      background: #0f172a;
       display: none;
     }
 
@@ -438,7 +469,7 @@ fun getPlayzoneWebAppHtml(): String {
       <div class="console-output" id="consoleOutput">Pixel Pathsala Playzone Ready. Write code or select a test snippet, then tap '▶ Run Code'.</div>
 
       <!-- HTML Live Rendered Preview -->
-      <iframe id="htmlPreviewFrame"></iframe>
+      <iframe id="htmlPreviewFrame" sandbox="allow-scripts allow-modals allow-forms"></iframe>
     </div>
   </div>
 
@@ -462,12 +493,15 @@ fun getPlayzoneWebAppHtml(): String {
         "Palindrome": 'words = ["madam", "python", "racecar", "pathsala", "radar"]\\n\\nfor w in words:\\n    if w == w[::-1]:\\n        print(f"\'{w}\' is a Palindrome ✓")\\n    else:\\n        print(f"\'{w}\' is NOT a palindrome ✗")',
         "Student Grades": 'students = {\\n    "Rohan": 92,\\n    "Priya": 85,\\n    "Amit": 74,\\n    "Sneha": 98\\n}\\n\\nprint("--- Student Grade Report ---")\\nfor name, score in students.items():\\n    grade = "A+" if score >= 90 else "A" if score >= 80 else "B"\\n    print(f"{name}: {score} -> Grade {grade}")',
         "Multiplication Table": 'n = 8\\nprint(f"--- Multiplication Table of {n} ---")\\nfor i in range(1, 11):\\n    print(f"{n} x {i} = {n * i}")',
-        "Math Operations": 'numbers = [12, 45, 78, 23, 56, 89, 34]\\nprint(f"Numbers: {numbers}")\\nprint(f"Max: {max(numbers)}")\\nprint(f"Min: {min(numbers)}")\\nprint(f"Sum: {sum(numbers)}")\\nprint(f"Count: {len(numbers)}")'
+        "Math Operations": 'numbers = [12, 45, 78, 23, 56, 89, 34]\\nprint(f"Numbers: {numbers}")\\nprint(f"Max: {max(numbers)}")\\nprint(f"Min: {min(numbers)}")\\nprint(f"Sum: {sum(numbers)}")\\nprint(f"Count: {len(numbers)}")',
+        "Even Odd Filter": 'nums = [14, 21, 33, 48, 55, 62, 77, 80, 99]\\nevens = []\\nodds = []\\nfor x in nums:\\n    if x % 2 == 0:\\n        evens.append(x)\\n    else:\\n        odds.append(x)\\nprint(f"Original: {nums}")\\nprint(f"Even numbers ({len(evens)}): {evens}")\\nprint(f"Odd numbers ({len(odds)}): {odds}")',
+        "String Reversal": 'def reverse_text(s):\\n    return s[::-1]\\n\\ntext = "Pixel Pathsala Educational Portal"\\nprint(f"Original: {text}")\\nprint(f"Reversed: {reverse_text(text)}")'
       },
       html: {
         "Interactive Card": '<!DOCTYPE html>\\n<html>\\n<head>\\n  <style>\\n    body { font-family: sans-serif; background: #0f172a; color: #fff; padding: 20px; text-align: center; }\\n    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 300px; margin: 0 auto; border: 1px solid #38bdf8; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }\\n    button { background: #38bdf8; border: none; padding: 10px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; color: #0f172a; margin-top: 12px; }\\n  </style>\\n</head>\\n<body>\\n  <div class="card">\\n    <h2>Pixel Pathsala</h2>\\n    <p style="color: #94a3b8; font-size: 13px;">Web Dev Sandbox</p>\\n    <h1 id="counter" style="color: #38bdf8; margin: 14px 0;">0</h1>\\n    <button onclick="increment()">Click to Count</button>\\n  </div>\\n  <script>\\n    let count = 0;\\n    function increment() {\\n      count++;\\n      document.getElementById("counter").innerText = count;\\n    }\\n  <\\/script>\\n</body>\\n</html>',
         "Student Table": '<!DOCTYPE html>\\n<html>\\n<head>\\n  <style>\\n    body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 16px; }\\n    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }\\n    th, td { padding: 10px; border: 1px solid #334155; text-align: left; }\\n    th { background: #0284c7; color: #fff; }\\n  </style>\\n</head>\\n<body>\\n  <h3>Enrolled Batch Students</h3>\\n  <table>\\n    <tr><th>Roll No</th><th>Name</th><th>Course</th><th>Status</th></tr>\\n    <tr><td>PP-101</td><td>Rahul Roy</td><td>Computer Science</td><td>Active</td></tr>\\n    <tr><td>PP-102</td><td>Ananya Sen</td><td>Class 11 Science</td><td>Active</td></tr>\\n    <tr><td>PP-103</td><td>Pooja Karmakar</td><td>Web Tech</td><td>Active</td></tr>\\n  </table>\\n</body>\\n</html>',
-        "Color Palette": '<!DOCTYPE html>\\n<html>\\n<head>\\n  <style>\\n    body { font-family: sans-serif; background: #0f172a; padding: 16px; text-align: center; color: white; }\\n    .box { width: 100%; height: 100px; border-radius: 8px; margin: 10px 0; display: flex; align-items: center; justify-content: center; font-weight: bold; }\\n    .b1 { background: #0284c7; }\\n    .b2 { background: #16a34a; }\\n    .b3 { background: #f59e0b; }\\n  </style>\\n</head>\\n<body>\\n  <h3>Pixel Color Palette</h3>\\n  <div class="box b1">Primary Cyan</div>\\n  <div class="box b2">Success Emerald</div>\\n  <div class="box b3">Warning Amber</div>\\n</body>\\n</html>'
+        "Color Palette": '<!DOCTYPE html>\\n<html>\\n<head>\\n  <style>\\n    body { font-family: sans-serif; background: #0f172a; padding: 16px; text-align: center; color: white; }\\n    .box { width: 100%; height: 60px; border-radius: 8px; margin: 8px 0; display: flex; align-items: center; justify-content: center; font-weight: bold; }\\n    .b1 { background: #0284c7; }\\n    .b2 { background: #16a34a; }\\n    .b3 { background: #f59e0b; }\\n  </style>\\n</head>\\n<body>\\n  <h3>Pixel Color Palette</h3>\\n  <div class="box b1">Primary Cyan (#0284C7)</div>\\n  <div class="box b2">Success Emerald (#16A34A)</div>\\n  <div class="box b3">Warning Amber (#F59E0B)</div>\\n</body>\\n</html>',
+        "Quiz Card UI": '<!DOCTYPE html>\\n<html>\\n<head>\\n  <style>\\n    body { font-family: sans-serif; background: #0f172a; color: #fff; padding: 16px; }\\n    .quiz-box { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; max-width: 320px; margin: 0 auto; }\\n    .opt { background: #0f172a; padding: 8px 12px; margin: 6px 0; border-radius: 6px; cursor: pointer; border: 1px solid #334155; }\\n    .opt:hover { border-color: #38bdf8; }\\n  </style>\\n</head>\\n<body>\\n  <div class="quiz-box">\\n    <h4>Q. What is the output of 2 ** 3 in Python?</h4>\\n    <div class="opt" onclick="check(6)">A) 6</div>\\n    <div class="opt" onclick="check(8)">B) 8</div>\\n    <div class="opt" onclick="check(9)">C) 9</div>\\n    <p id="ansMsg" style="margin-top: 10px; font-weight: bold;"></p>\\n  </div>\\n  <script>\\n    function check(val) {\\n      const msg = document.getElementById("ansMsg");\\n      if (val === 8) {\\n        msg.style.color = "#4ade80";\\n        msg.innerText = "Correct! 2 ** 3 = 8 ✓";\\n      } else {\\n        msg.style.color = "#f87171";\\n        msg.innerText = "Incorrect choice. Try again ✗";\\n      }\\n    }\\n  <\\/script>\\n</body>\\n</html>'
       },
       sql: {
         "All Students": 'SELECT * FROM students;',
@@ -710,6 +744,14 @@ fun getPlayzoneWebAppHtml(): String {
           return 'let ' + body + ';';
         });
 
+        // Loop safety guards to prevent infinite loops from hanging Chromium renderer
+        clean = clean.replace(/\bwhile\s*\(([^)]+)\)\s*\{/g, (m, cond) => {
+          return 'let __cw = 0; while (' + cond + ') { if (++__cw > 25000) throw new Error("Infinite loop detected in C program (>25,000 iterations in while loop)");';
+        });
+        clean = clean.replace(/\bfor\s*\(([^;]+);([^;]+);([^)]+)\)\s*\{/g, (m, init, cond, inc) => {
+          return 'let __cf = 0; for (' + init + ';' + cond + ';' + inc + ') { if (++__cf > 50000) throw new Error("Loop limit exceeded in C program (>50,000 iterations)");';
+        });
+
         // Run transpiled JS sandbox
         const runner = new Function('__c_printf', clean + '\n if (typeof __c_main === "function") { __c_main(); }');
 
@@ -736,7 +778,7 @@ fun getPlayzoneWebAppHtml(): String {
           let items = [];
           for (let a of args) {
             if (Array.isArray(a)) {
-              items.push("[" + a.map(function(elem) { return typeof elem === "string" ? "\'" + elem + "\'" : String(elem); }).join(", ") + "]");
+              items.push("[" + a.map(function(elem) { return typeof elem === "string" ? "'" + elem + "'" : String(elem); }).join(", ") + "]");
             } else if (typeof a === 'object' && a !== null) {
               items.push(JSON.stringify(a));
             } else {
@@ -767,29 +809,86 @@ fun getPlayzoneWebAppHtml(): String {
         function min(...x) { const flat = Array.isArray(x[0]) ? x[0] : x; return Math.min(...flat); }
         function max(...x) { const flat = Array.isArray(x[0]) ? x[0] : x; return Math.max(...flat); }
         function abs(x) { return Math.abs(x); }
+        function round(x, n) { return n !== undefined ? Number(Number(x).toFixed(n)) : Math.round(Number(x)); }
+        function str(x) { return String(x); }
+        function int(x) { return Math.trunc(Number(x)); }
+        function float(x) { return Number(x); }
+        function bool(x) { return Boolean(x); }
 
-        // Transpile Python indentation to JS blocks
-        const lines = code.split('\n');
-        let jsLines = [];
-        let indentStack = [0];
-        let declaredVars = new Set(['print', 'range', 'len', 'sum', 'min', 'max', 'abs', 'Math']);
+        // Pre-pass: combine logical lines across brackets
+        const rawLines = code.split('\n');
+        const logicalLines = [];
+        let buffer = '';
+        let bracketDepth = 0;
+        let startIndent = 0;
 
-        for (let idx = 0; idx < lines.length; idx++) {
-          const rawLine = lines[idx];
-          const trimmed = rawLine.trim();
+        for (let idx = 0; idx < rawLines.length; idx++) {
+          const raw = rawLines[idx];
+          const trimmed = raw.trim();
+          if (!trimmed || trimmed.startsWith('#')) {
+            if (bracketDepth === 0) continue;
+          }
 
-          if (!trimmed) continue;
-          if (trimmed.startsWith('#')) continue;
+          let inQuotes = false;
+          let quoteChar = '';
+          for (let i = 0; i < raw.length; i++) {
+            const ch = raw[i];
+            if ((ch === '"' || ch === '\'') && (i === 0 || raw[i-1] !== '\\')) {
+              if (!inQuotes) { inQuotes = true; quoteChar = ch; }
+              else if (quoteChar === ch) { inQuotes = false; }
+            } else if (!inQuotes) {
+              if (ch === '(' || ch === '[' || ch === '{') bracketDepth++;
+              else if (ch === ')' || ch === ']' || ch === '}') bracketDepth = Math.max(0, bracketDepth - 1);
+            }
+          }
 
-          const leadingWhitespace = rawLine.match(/^\s*/)[0];
-          const indent = leadingWhitespace.replace(/\t/g, '    ').length;
+          if (buffer === '') {
+            const match = raw.match(/^\s*/);
+            startIndent = match ? match[0].replace(/\t/g, '    ').length : 0;
+            buffer = trimmed;
+          } else {
+            buffer += ' ' + trimmed;
+          }
+
+          if (bracketDepth === 0) {
+            logicalLines.push({ indent: startIndent, text: buffer });
+            buffer = '';
+          }
+        }
+        if (buffer) {
+          logicalLines.push({ indent: startIndent, text: buffer });
+        }
+
+        // Collect all variable identifiers for safe scoping
+        const allVars = new Set();
+        for (let item of logicalLines) {
+          const line = item.text;
+          const assignMatch = line.match(/^([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\s*=/);
+          if (assignMatch && !line.startsWith('if') && !line.startsWith('for') && !line.startsWith('while')) {
+            assignMatch[1].split(',').forEach(v => allVars.add(v.trim()));
+          }
+          const forMatch = line.match(/^for\s+([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\s+in/);
+          if (forMatch) {
+            forMatch[1].split(',').forEach(v => allVars.add(v.trim()));
+          }
+        }
+
+        const jsLines = [];
+        const indentStack = [0];
+
+        if (allVars.size > 0) {
+          jsLines.push('var ' + Array.from(allVars).join(', ') + ';');
+        }
+
+        for (let item of logicalLines) {
+          const indent = item.indent;
+          let line = item.text;
 
           while (indent < indentStack[indentStack.length - 1]) {
             indentStack.pop();
             jsLines.push(' '.repeat(indentStack[indentStack.length - 1]) + '}');
           }
 
-          let line = trimmed;
           const hashIdx = line.indexOf(' #');
           if (hashIdx !== -1) line = line.substring(0, hashIdx).trim();
 
@@ -802,9 +901,13 @@ fun getPlayzoneWebAppHtml(): String {
             .replace(/\bNone\b/g, 'null')
             .replace(/\band\b/g, '&&')
             .replace(/\bor\b/g, '||')
-            .replace(/\bnot\s+/g, '!');
+            .replace(/\bnot\s+/g, '!')
+            .replace(/\.lower\(\)/g, '.toLowerCase()')
+            .replace(/\.upper\(\)/g, '.toUpperCase()')
+            .replace(/\.strip\(\)/g, '.trim()')
+            .replace(/\.append\s*\(/g, '.push(');
 
-          // Handle f-strings with string concatenation
+          // Handle f-strings
           line = line.replace(/f(["'])(.*?)\1/g, function(m, quote, content) {
             var parts = content.split(/\{([^}]+)\}/);
             var exprs = [];
@@ -831,9 +934,6 @@ fun getPlayzoneWebAppHtml(): String {
 
           // Handle Python ternary: a if cond else b -> (cond ? a : b)
           line = line.replace(/([^\s]+)\s+if\s+([^:]+?)\s+else\s+([^\s;]+)/g, '($2 ? $1 : $3)');
-
-          // Handle .append() -> .push()
-          line = line.replace(/\.append\s*\(/g, '.push(');
 
           if (line.startsWith('def ')) {
             const rest = line.substring(4).trim();
@@ -868,7 +968,10 @@ fun getPlayzoneWebAppHtml(): String {
 
           if (line.startsWith('while ')) {
             const cond = line.substring(6).trim();
+            const wVar = '__wSafety_' + indent;
+            jsLines.push(' '.repeat(indent) + 'let ' + wVar + ' = 0;');
             jsLines.push(' '.repeat(indent) + 'while (' + cond + ') {');
+            jsLines.push(' '.repeat(indent + 4) + 'if (++' + wVar + ' > 25000) throw new Error("Infinite loop detected (>25,000 iterations in while loop)");');
             indentStack.push(indent + 4);
             continue;
           }
@@ -877,6 +980,8 @@ fun getPlayzoneWebAppHtml(): String {
             const forContent = line.substring(4).trim();
             if (forContent.includes(' in ')) {
               const [iterVar, iterObj] = forContent.split(' in ').map(s => s.trim());
+              const fVar = '__fSafety_' + indent;
+              jsLines.push(' '.repeat(indent) + 'let ' + fVar + ' = 0;');
               if (iterObj.includes('.items()')) {
                 const dictObj = iterObj.replace('.items()', '');
                 const vars = iterVar.split(',').map(v => v.trim());
@@ -884,22 +989,18 @@ fun getPlayzoneWebAppHtml(): String {
               } else {
                 jsLines.push(' '.repeat(indent) + 'for (let ' + iterVar + ' of ' + iterObj + ') {');
               }
+              jsLines.push(' '.repeat(indent + 4) + 'if (++' + fVar + ' > 50000) throw new Error("Loop limit exceeded (>50,000 iterations)");');
               indentStack.push(indent + 4);
               continue;
             }
           }
 
-          // Variable assignment
-          const assignMatch = line.match(/^([a-zA-Z_]\w*)\s*=\s*(.+)$/);
-          if (assignMatch && !line.startsWith('if') && !line.startsWith('for')) {
-            const varName = assignMatch[1];
-            const expr = assignMatch[2];
-            if (!declaredVars.has(varName)) {
-              declaredVars.add(varName);
-              jsLines.push(' '.repeat(indent) + 'let ' + varName + ' = ' + expr + ';');
-            } else {
-              jsLines.push(' '.repeat(indent) + varName + ' = ' + expr + ';');
-            }
+          // Multiple assignments: a, b = 0, 1 or a, b = b, a + b
+          const multiAssign = line.match(/^([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)+)\s*=\s*(.+)$/);
+          if (multiAssign) {
+            const vars = multiAssign[1].split(',').map(v => v.trim());
+            const exprs = multiAssign[2].split(',').map(e => e.trim());
+            jsLines.push(' '.repeat(indent) + '[' + vars.join(', ') + '] = [' + exprs.join(', ') + '];');
             continue;
           }
 
@@ -912,8 +1013,8 @@ fun getPlayzoneWebAppHtml(): String {
         }
 
         const transpiledJs = jsLines.join('\n');
-        const runner = new Function('print', 'range', 'len', 'sum', 'min', 'max', 'abs', transpiledJs);
-        runner(print, range, len, sum, min, max, abs);
+        const runner = new Function('print', 'range', 'len', 'sum', 'min', 'max', 'abs', 'round', 'str', 'int', 'float', 'bool', transpiledJs);
+        runner(print, range, len, sum, min, max, abs, round, str, int, float, bool);
 
         if (pyOutput.length > 0) {
           logOutput(pyOutput, "success");
@@ -929,15 +1030,13 @@ fun getPlayzoneWebAppHtml(): String {
     function runHtmlPreview(code) {
       try {
         const frame = document.getElementById('htmlPreviewFrame');
+        const consoleOut = document.getElementById('consoleOutput');
         if (frame) {
-          const doc = frame.contentDocument || (frame.contentWindow ? frame.contentWindow.document : null);
-          if (doc) {
-            doc.open();
-            doc.write(code);
-            doc.close();
-          } else {
-            frame.srcdoc = code;
-          }
+          frame.style.display = 'block';
+          if (consoleOut) consoleOut.style.display = 'none';
+
+          // Isolated srcdoc execution prevents any global pollution or document wiping
+          frame.srcdoc = code;
         }
         logOutput("HTML rendered in Live Preview sandbox.", "success");
       } catch (e) {

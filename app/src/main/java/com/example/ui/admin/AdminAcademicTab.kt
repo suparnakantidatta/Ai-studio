@@ -44,6 +44,7 @@ fun AdminAcademicTab(
   onUpdateNote: (StudyMaterial) -> Unit,
   onDeleteNote: (String) -> Unit,
   onTogglePostpone: (String, Boolean, String?) -> Unit = { _, _, _ -> },
+  onRescheduleClass: (String, String, String, String, String?) -> Unit = { _, _, _, _, _ -> },
   onSendNotification: (LiveClassSession) -> Unit = {}
 ) {
   var activeSubTab by remember { mutableIntStateOf(0) } // 0: Scheduled Classes, 1: Notes as Web Portal
@@ -60,6 +61,12 @@ fun AdminAcademicTab(
   var postponingSession by remember { mutableStateOf<LiveClassSession?>(null) }
   var postponeReasonText by remember { mutableStateOf("") }
   var notifConfirmationSession by remember { mutableStateOf<LiveClassSession?>(null) }
+
+  var reschedulingSession by remember { mutableStateOf<LiveClassSession?>(null) }
+  var rescheduleDateText by remember { mutableStateOf("") }
+  var rescheduleStartTimeText by remember { mutableStateOf("") }
+  var rescheduleEndTimeText by remember { mutableStateOf("") }
+  var rescheduleReasonText by remember { mutableStateOf("") }
 
   val displayedClasses = remember(liveClasses, selectedBatchFilter) {
     if (selectedBatchFilter == null) {
@@ -293,7 +300,6 @@ fun AdminAcademicTab(
                             postponeReasonText = session.postponeReason ?: "Postponed due to center maintenance / reschedule"
                           } else {
                             onTogglePostpone(session.id, false, null)
-                            onUpdateClass(session.copy(isPostponed = false, status = "scheduled", postponeReason = null))
                             Toast.makeText(context, "Class schedule restored to Active", Toast.LENGTH_SHORT).show()
                           }
                         }
@@ -303,7 +309,6 @@ fun AdminAcademicTab(
                     Button(
                       onClick = {
                         onSendNotification(session)
-                        onUpdateClass(session.copy(notificationSent = true))
                         notifConfirmationSession = session
                         Toast.makeText(context, "Notification dispatched for ${batch?.name ?: session.title}!", Toast.LENGTH_SHORT).show()
                       },
@@ -329,7 +334,7 @@ fun AdminAcademicTab(
                 // Actions row
                 Row(
                   modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   if (!session.meetingUrl.isNullOrBlank()) {
@@ -341,27 +346,46 @@ fun AdminAcademicTab(
                         } catch (_: Exception) {}
                       },
                       shape = RoundedCornerShape(8.dp),
-                      modifier = Modifier.weight(1f)
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                      Icon(Icons.Default.Launch, contentDescription = null, modifier = Modifier.size(16.dp))
-                      Spacer(modifier = Modifier.width(4.dp))
-                      Text("Portal", fontSize = 12.sp)
+                      Icon(Icons.Default.Launch, contentDescription = null, modifier = Modifier.size(14.dp))
+                      Spacer(modifier = Modifier.width(3.dp))
+                      Text("Portal", fontSize = 11.sp)
                     }
+                  }
+
+                  FilledTonalButton(
+                    onClick = {
+                      reschedulingSession = session
+                      rescheduleDateText = session.scheduledDate
+                      rescheduleStartTimeText = session.startTime
+                      rescheduleEndTimeText = session.endTime
+                      rescheduleReasonText = ""
+                    },
+                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = BrandPrimary.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                  ) {
+                    Icon(Icons.Default.Schedule, contentDescription = "Reschedule", tint = BrandPrimary, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Reschedule", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
                   }
 
                   OutlinedButton(
                     onClick = { editingClass = session },
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                   ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Edit", fontSize = 12.sp)
+                    Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Edit", fontSize = 11.sp)
                   }
 
                   IconButton(
-                    onClick = { onDeleteClass(session.id) }
+                    onClick = { onDeleteClass(session.id) },
+                    modifier = Modifier.size(36.dp)
                   ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed)
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed, modifier = Modifier.size(18.dp))
                   }
                 }
               }
@@ -559,6 +583,7 @@ fun AdminAcademicTab(
   }
 
   if (postponingSession != null) {
+    val session = postponingSession!!
     AlertDialog(
       onDismissRequest = { postponingSession = null },
       title = {
@@ -588,14 +613,8 @@ fun AdminAcademicTab(
       confirmButton = {
         Button(
           onClick = {
-            val session = postponingSession!!
-            val updated = session.copy(
-              isPostponed = true,
-              status = "postponed",
-              postponeReason = postponeReasonText.trim().ifBlank { "Postponed by faculty" }
-            )
-            onTogglePostpone(session.id, true, updated.postponeReason)
-            onUpdateClass(updated)
+            val reasonClean = postponeReasonText.trim().ifBlank { "Postponed by center administration" }
+            onTogglePostpone(session.id, true, reasonClean)
             Toast.makeText(context, "Class marked as Postponed with student notice", Toast.LENGTH_SHORT).show()
             postponingSession = null
           },
@@ -606,6 +625,90 @@ fun AdminAcademicTab(
       },
       dismissButton = {
         TextButton(onClick = { postponingSession = null }) { Text("Cancel") }
+      }
+    )
+  }
+
+  if (reschedulingSession != null) {
+    val session = reschedulingSession!!
+    val batch = batches.firstOrNull { it.id == session.batchId }
+
+    AlertDialog(
+      onDismissRequest = { reschedulingSession = null },
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.Schedule, contentDescription = null, tint = BrandPrimary)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Reschedule Class Session", fontWeight = FontWeight.Bold)
+        }
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            text = "Update scheduled date & time for ${session.title} (${batch?.name ?: session.subject}). Updates will sync to database and alert students once.",
+            fontSize = 12.sp,
+            color = Slate600
+          )
+
+          OutlinedTextField(
+            value = rescheduleDateText,
+            onValueChange = { rescheduleDateText = it },
+            label = { Text("New Scheduled Date (YYYY-MM-DD) *") },
+            placeholder = { Text("2026-10-27") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            OutlinedTextField(
+              value = rescheduleStartTimeText,
+              onValueChange = { rescheduleStartTimeText = it },
+              label = { Text("Start Time *") },
+              placeholder = { Text("10:00 AM") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+
+            OutlinedTextField(
+              value = rescheduleEndTimeText,
+              onValueChange = { rescheduleEndTimeText = it },
+              label = { Text("End Time *") },
+              placeholder = { Text("11:30 AM") },
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+          }
+
+          OutlinedTextField(
+            value = rescheduleReasonText,
+            onValueChange = { rescheduleReasonText = it },
+            label = { Text("Reschedule Note / Remarks (Optional)") },
+            placeholder = { Text("e.g. Center schedule revision") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val dateClean = rescheduleDateText.trim().ifBlank { session.scheduledDate }
+            val startClean = rescheduleStartTimeText.trim().ifBlank { session.startTime }
+            val endClean = rescheduleEndTimeText.trim().ifBlank { session.endTime }
+            onRescheduleClass(session.id, dateClean, startClean, endClean, rescheduleReasonText.trim().ifBlank { null })
+            Toast.makeText(context, "Class rescheduled to $dateClean at $startClean", Toast.LENGTH_SHORT).show()
+            reschedulingSession = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary)
+        ) {
+          Text("Confirm Reschedule", color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { reschedulingSession = null }) { Text("Cancel") }
       }
     )
   }

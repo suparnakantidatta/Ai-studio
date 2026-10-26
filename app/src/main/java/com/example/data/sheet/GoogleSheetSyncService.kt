@@ -161,7 +161,7 @@ class GoogleSheetSyncService {
   suspend fun pushLiveClass(session: LiveClassSession): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
       val json = JSONObject().apply {
-        put("action", "scheduleClass")
+        put("action", if (session.isPostponed) "postponeClass" else "scheduleClass")
         put("id", session.id)
         put("title", session.title)
         put("subject", session.subject)
@@ -176,6 +176,39 @@ class GoogleSheetSyncService {
         put("meetingUrl", session.meetingUrl ?: "")
         put("isPostponed", session.isPostponed)
         put("postponeReason", session.postponeReason ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun postponeClass(sessionId: String, isPostponed: Boolean, reason: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "postponeClass")
+        put("id", sessionId)
+        put("isPostponed", isPostponed)
+        put("status", if (isPostponed) "postponed" else "scheduled")
+        put("postponeReason", if (isPostponed) (reason ?: "Postponed by center administration") else "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun rescheduleClass(sessionId: String, newDate: String, newStartTime: String, newEndTime: String, reason: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "rescheduleClass")
+        put("id", sessionId)
+        put("date", newDate)
+        put("startTime", newStartTime)
+        put("endTime", newEndTime)
+        put("status", "scheduled")
+        put("isPostponed", false)
+        put("postponeReason", reason ?: "")
       }
       postJson(json)
     } catch (e: Exception) {

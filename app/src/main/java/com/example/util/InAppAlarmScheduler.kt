@@ -6,31 +6,47 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
-import com.example.data.model.Batch
 import com.example.data.model.LiveClassSession
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 object InAppAlarmScheduler {
 
   fun scheduleClassAlarm(context: Context, session: LiveClassSession, showToast: Boolean = false) {
     try {
-      val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-      val timeParts = parseTimeString(session.startTime)
+      if (session.isPostponed || session.status.equals("postponed", ignoreCase = true)) {
+        cancelClassAlarm(context, session.id)
+        return
+      }
 
-      val calendar = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, timeParts.first)
-        set(Calendar.MINUTE, timeParts.second)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-        if (timeInMillis <= System.currentTimeMillis()) {
-          add(Calendar.DAY_OF_YEAR, 1)
-        }
+      val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+
+      val classStartTimeMillis = computeClassStartTimeMillis(session.scheduledDate, session.startTime)
+      val now = System.currentTimeMillis()
+
+      // Class already finished in the past
+      if (classStartTimeMillis <= now) {
+        return
+      }
+
+      // Ring ONLY 30 minutes before class start
+      val targetAlarmMillis = classStartTimeMillis - 30 * 60 * 1000L
+
+      val triggerMillis = if (targetAlarmMillis > now) {
+        targetAlarmMillis
+      } else {
+        // Class is starting in less than 30 minutes: alert promptly in 3 seconds
+        now + 3000L
       }
 
       val intent = Intent(context, ClassAlarmReceiver::class.java).apply {
         putExtra("title", session.title)
         putExtra("subject", session.subject)
         putExtra("time", session.startTime)
+        putExtra("sessionId", session.id)
       }
 
       val requestCode = (session.id.hashCode() and 0x7FFFFFFF)
@@ -42,56 +58,74 @@ object InAppAlarmScheduler {
       )
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
       } else {
-        alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
       }
 
       if (showToast) {
-        Toast.makeText(context, "Class alarm set for ${session.startTime} in Pathsala ERP", Toast.LENGTH_SHORT).show()
+        val minDiff = ((classStartTimeMillis - now) / 60000).toInt()
+        Toast.makeText(context, "Alarm set: Rings 30 min before class (${session.startTime})", Toast.LENGTH_SHORT).show()
       }
     } catch (_: Exception) {}
   }
 
-  fun scheduleBatchAlarm(context: Context, batch: Batch, showToast: Boolean = false) {
+  fun cancelClassAlarm(context: Context, sessionId: String) {
     try {
       val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-      val timeParts = parseTimeString(batch.timings)
-
-      val calendar = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, timeParts.first)
-        set(Calendar.MINUTE, timeParts.second)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-        if (timeInMillis <= System.currentTimeMillis()) {
-          add(Calendar.DAY_OF_YEAR, 1)
-        }
-      }
-
-      val intent = Intent(context, ClassAlarmReceiver::class.java).apply {
-        putExtra("title", "Batch Routine: ${batch.name}")
-        putExtra("subject", batch.scheduleDays)
-        putExtra("time", batch.timings)
-      }
-
-      val requestCode = (("batch_" + batch.id).hashCode() and 0x7FFFFFFF)
+      val intent = Intent(context, ClassAlarmReceiver::class.java)
+      val requestCode = (sessionId.hashCode() and 0x7FFFFFFF)
       val pendingIntent = PendingIntent.getBroadcast(
         context,
         requestCode,
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
       )
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
-      } else {
-        alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
-      }
-
-      if (showToast) {
-        Toast.makeText(context, "Routine reminder set for ${batch.name} (${batch.timings}) in Pathsala app", Toast.LENGTH_SHORT).show()
-      }
+      alarmManager.cancel(pendingIntent)
     } catch (_: Exception) {}
+  }
+
+  private fun computeClassStartTimeMillis(dateStr: String, timeStr: String): Long {
+    val cal = Calendar.getInstance()
+    val timeParts = parseTimeString(timeStr)
+
+    // Parse date if provided
+    var dateSet = false
+    val trimmedDate = dateStr.trim()
+    if (trimmedDate.isNotEmpty()) {
+      val cleanDate = if (trimmedDate.contains("T")) trimmedDate.substringBefore("T") else trimmedDate
+      val dateFormats = listOf(
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()),
+        SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()),
+        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()),
+        SimpleDateFormat("yyyy/MM/dd", Locale.getDefault())
+      )
+      for (df in dateFormats) {
+        try {
+          val parsed = df.parse(cleanDate)
+          if (parsed != null) {
+            val dateCal = Calendar.getInstance().apply { time = parsed }
+            cal.set(Calendar.YEAR, dateCal.get(Calendar.YEAR))
+            cal.set(Calendar.MONTH, dateCal.get(Calendar.MONTH))
+            cal.set(Calendar.DAY_OF_MONTH, dateCal.get(Calendar.DAY_OF_MONTH))
+            dateSet = true
+            break
+          }
+        } catch (_: Exception) {}
+      }
+    }
+
+    cal.set(Calendar.HOUR_OF_DAY, timeParts.first)
+    cal.set(Calendar.MINUTE, timeParts.second)
+    cal.set(Calendar.SECOND, 0)
+    cal.set(Calendar.MILLISECOND, 0)
+
+    // If no specific calendar date was given and time today has already elapsed, assume next day session
+    if (!dateSet && cal.timeInMillis <= System.currentTimeMillis()) {
+      cal.add(Calendar.DAY_OF_YEAR, 1)
+    }
+
+    return cal.timeInMillis
   }
 
   private fun parseTimeString(timeStr: String): Pair<Int, Int> {
