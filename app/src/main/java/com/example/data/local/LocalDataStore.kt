@@ -107,10 +107,16 @@ class LocalDataStore(context: Context) {
   fun getStudyMaterials(): List<StudyMaterial> = getList("materials", emptyList())
   fun saveStudyMaterials(list: List<StudyMaterial>) = putList("materials", list)
 
-  fun getExams(): List<OnlineExam> = getList("exams", emptyList())
+  fun getExams(): List<OnlineExam> {
+    val list = getList("exams", emptyList<OnlineExam>())
+    return if (list.isEmpty()) com.example.data.seed.SeedExamData.INITIAL_EXAMS else list
+  }
   fun saveExams(list: List<OnlineExam>) = putList("exams", list)
 
-  fun getQuestions(): List<ExamQuestion> = getList("questions", emptyList())
+  fun getQuestions(): List<ExamQuestion> {
+    val list = getList("questions", emptyList<ExamQuestion>())
+    return if (list.isEmpty()) com.example.data.seed.SeedExamData.INITIAL_QUESTIONS else list
+  }
   fun saveQuestions(list: List<ExamQuestion>) = putList("questions", list)
 
   fun getExamSubmissions(): List<ExamSubmission> = getList("submissions", emptyList())

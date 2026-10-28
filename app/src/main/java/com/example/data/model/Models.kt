@@ -191,7 +191,7 @@ data class StudyMaterial(
 @JsonClass(generateAdapter = true)
 data class ExamQuestion(
   val id: String,
-  val examId: String,
+  val examId: String = "",
   val questionText: String,
   val optionA: String,
   val optionB: String,
@@ -199,21 +199,38 @@ data class ExamQuestion(
   val optionD: String,
   val correctOption: String = "A",
   val marks: Int = 1,
-  val courseId: String? = null
+  val courseId: String? = null,
+  val academicClass: String? = null,
+  val subject: String = "General",
+  val topic: String = "",
+  val codeSnippet: String? = null,
+  val explanation: String? = null,
+  val difficulty: String = "medium",
+  val createdAt: String = ""
 )
 
 @JsonClass(generateAdapter = true)
 data class OnlineExam(
   val id: String,
   val title: String,
+  val examCode: String = "",
   val subject: String = "General",
   val courseId: String? = null,
   val batchId: String? = null,
+  val academicClass: String = "",
   val totalMarks: Int = 20,
+  val passingMarks: Int = 8,
+  val passingPercentage: Int = 40,
   val durationMinutes: Int = 30,
   val scheduledDate: String = "",
-  val status: String = "published",
-  val questionIds: String? = null
+  val startTime: String = "10:00 AM",
+  val endTime: String = "11:00 AM",
+  val status: String = "active",
+  val isPublished: Boolean = true,
+  val mode: String = "online",
+  val questionIds: String? = null,
+  val instructions: String? = null,
+  val createdAt: String = ""
 )
 
 @JsonClass(generateAdapter = true)
@@ -224,7 +241,11 @@ data class ExamSubmission(
   val studentName: String,
   val score: Int,
   val totalMarks: Int,
-  val submittedAt: String = ""
+  val submittedAt: String = "",
+  val percentage: Int = 0,
+  val passed: Boolean = true,
+  val timeSpentSeconds: Int = 0,
+  val answersJson: String = "{}"
 )
 
 @JsonClass(generateAdapter = true)

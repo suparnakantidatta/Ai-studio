@@ -151,7 +151,8 @@ object NotificationHelper {
     subject: String,
     batchName: String?,
     isPostponed: Boolean,
-    postponeReason: String? = null
+    postponeReason: String? = null,
+    notificationId: Int = CLASS_NOTIF_ID
   ) {
     try {
       createNotificationChannels(context)
@@ -163,7 +164,7 @@ object NotificationHelper {
 
       val pendingIntent = PendingIntent.getActivity(
         context,
-        CLASS_NOTIF_ID,
+        notificationId,
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
       )
@@ -192,7 +193,7 @@ object NotificationHelper {
 
       val notificationManager = NotificationManagerCompat.from(context)
       try {
-        notificationManager.notify(CLASS_NOTIF_ID, builder.build())
+        notificationManager.notify(notificationId, builder.build())
       } catch (_: SecurityException) {}
     } catch (_: Exception) {}
   }
@@ -220,7 +221,8 @@ object NotificationHelper {
       subject = session.subject,
       batchName = batchName ?: session.academicClass,
       isPostponed = isPostponed,
-      postponeReason = session.postponeReason
+      postponeReason = session.postponeReason,
+      notificationId = (session.id.hashCode() and 0x7FFFFFFF)
     )
   }
 
@@ -242,12 +244,11 @@ object NotificationHelper {
       }
     }
 
-    // Only notify if there is an explicit scheduled or postponed class session
-    val targetClass = relevantClasses.firstOrNull { it.isPostponed || it.status.equals("postponed", ignoreCase = true) }
-      ?: relevantClasses.firstOrNull { it.status.equals("scheduled", ignoreCase = true) }
-
-    if (targetClass != null) {
-      notifyClassEventOnce(context, targetClass, studentBatch?.name)
+    // Loop through all relevant classes and notify once per scheduled or postponed state
+    relevantClasses.forEach { session ->
+      if (session.isPostponed || session.status.equals("postponed", ignoreCase = true) || session.status.equals("scheduled", ignoreCase = true)) {
+        notifyClassEventOnce(context, session, studentBatch?.name)
+      }
     }
   }
 

@@ -56,6 +56,9 @@ fun AdminMainScreen(
   val admissions by repository.admissions.collectAsState()
   val liveClasses by repository.liveClasses.collectAsState()
   val studyMaterials by repository.studyMaterials.collectAsState()
+  val exams by repository.exams.collectAsState()
+  val questions by repository.questions.collectAsState()
+  val submissions by repository.submissions.collectAsState()
   val expenses by repository.expenses.collectAsState()
   val telemetries by repository.studentTelemetries.collectAsState()
   val isSyncing by repository.isSyncing.collectAsState()
@@ -201,7 +204,7 @@ fun AdminMainScreen(
           onNavigateToFees = { selectedTab = 1 },
           onNavigateToAcademic = { selectedTab = 2 },
           onNavigateToAdmissions = { selectedTab = 3 },
-          onNavigateToTracker = { selectedTab = 4 },
+          onNavigateToOperations = { selectedTab = 4 },
           onOpenNewAdmission = { showNewAdmissionDialog = true },
           onOpenUpdateDialog = { showUpdateDialog = true }
         )
@@ -251,6 +254,9 @@ fun AdminMainScreen(
           studyMaterials = studyMaterials,
           courses = courses,
           batches = batches,
+          exams = exams,
+          questions = questions,
+          submissions = submissions,
           onAddClass = { session ->
             repository.addLiveClass(session)
           },
@@ -277,6 +283,27 @@ fun AdminMainScreen(
           },
           onSendNotification = { session ->
             repository.markClassNotificationSent(session.id)
+          },
+          onAddExam = { exam ->
+            repository.addExam(exam)
+          },
+          onUpdateExam = { exam ->
+            repository.updateExam(exam)
+          },
+          onDeleteExam = { examId ->
+            repository.deleteExam(examId)
+          },
+          onToggleExamPublish = { examId ->
+            repository.toggleExamPublish(examId)
+          },
+          onAddQuestion = { q ->
+            repository.addQuestion(q)
+          },
+          onDeleteQuestion = { qId ->
+            repository.deleteQuestion(qId)
+          },
+          onDeleteSubmission = { subId ->
+            repository.deleteExamSubmission(subId)
           }
         )
         3 -> AdminAdmissionsTab(
@@ -500,7 +527,7 @@ fun AdminOverviewTab(
   onNavigateToFees: () -> Unit,
   onNavigateToAcademic: () -> Unit,
   onNavigateToAdmissions: () -> Unit,
-  onNavigateToTracker: () -> Unit,
+  onNavigateToOperations: () -> Unit,
   onOpenNewAdmission: () -> Unit,
   onOpenUpdateDialog: () -> Unit
 ) {
@@ -738,14 +765,14 @@ fun AdminOverviewTab(
           }
 
           Button(
-            onClick = onNavigateToTracker,
+            onClick = onNavigateToOperations,
             colors = ButtonDefaults.buttonColors(containerColor = BrandGoldDark),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.weight(1f)
           ) {
             Icon(Icons.Default.ManageAccounts, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Operations & GPS", fontSize = 12.sp)
+            Text("Operations", fontSize = 12.sp)
           }
         }
       }
@@ -2398,7 +2425,7 @@ fun NewAdmissionDialog(
 @Composable
 fun AdminOperationsTab(
   students: List<Student>,
-  telemetries: List<StudentTelemetry>,
+  telemetries: List<StudentTelemetry> = emptyList(),
   courses: List<Course>,
   batches: List<Batch>,
   expenses: List<Expense>,
@@ -2410,7 +2437,7 @@ fun AdminOperationsTab(
   onEditExpense: (Expense) -> Unit,
   onDeleteExpense: (String) -> Unit
 ) {
-  var activeView by remember { mutableIntStateOf(0) } // 0: Directory, 1: Live Tracker & Games, 2: Financials & Expenses
+  var activeView by remember { mutableIntStateOf(0) } // 0: Directory, 1: Financials & Expenses
 
   Column(modifier = Modifier.fillMaxSize()) {
     Surface(
@@ -2438,17 +2465,6 @@ fun AdminOperationsTab(
         FilterChip(
           selected = activeView == 1,
           onClick = { activeView = 1 },
-          leadingIcon = { Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(14.dp)) },
-          label = { Text("Tracker & Games", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BrandPrimary,
-            selectedLabelColor = Color.White
-          ),
-          modifier = Modifier.weight(1f)
-        )
-        FilterChip(
-          selected = activeView == 2,
-          onClick = { activeView = 2 },
           leadingIcon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(14.dp)) },
           label = { Text("Expenses (${expenses.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
           colors = FilterChipDefaults.filterChipColors(
@@ -2469,11 +2485,7 @@ fun AdminOperationsTab(
         onEditStudent = onEditStudent,
         onDeleteStudent = onDeleteStudent
       )
-      1 -> AdminTelemetryTrackerTab(
-        students = students,
-        telemetries = telemetries
-      )
-      2 -> AdminExpensesTab(
+      1 -> AdminExpensesTab(
         expenses = expenses,
         payments = payments,
         onAddExpense = onAddExpense,

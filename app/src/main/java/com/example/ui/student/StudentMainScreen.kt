@@ -154,16 +154,13 @@ fun StudentMainScreen(
     }
   }
 
-  // Strictly filter online exams for student's admission batch & course
+  // Strictly filter online exams for student's admission batch & course (matching web project logic)
   val filteredExams = remember(exams, student.batchId, student.courseId) {
     exams.filter { exam ->
-      val examBatch = exam.batchId?.trim() ?: ""
-      val examCourse = exam.courseId?.trim() ?: ""
-      when {
-        examBatch.isNotEmpty() && !examBatch.equals("all", ignoreCase = true) -> examBatch == student.batchId
-        examBatch.equals("all", ignoreCase = true) -> examCourse.isEmpty() || examCourse == student.courseId
-        else -> examCourse.isEmpty() || examCourse == student.courseId
-      }
+      if (!exam.isPublished) return@filter false
+      val matchCourse = exam.courseId.isNullOrBlank() || exam.courseId.equals("all", ignoreCase = true) || exam.courseId == student.courseId
+      val matchBatch = exam.batchId.isNullOrBlank() || exam.batchId.equals("all", ignoreCase = true) || exam.batchId == student.batchId
+      matchCourse && matchBatch
     }
   }
 
@@ -513,7 +510,7 @@ fun StudentMainScreen(
       }
 
       activeExamForWeb?.let { exam ->
-        ExamWebPlayerDialog(
+        NativeStudentExamPlayerDialog(
           exam = exam,
           student = student,
           repository = repository,

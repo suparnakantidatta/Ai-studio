@@ -183,7 +183,10 @@ class GoogleSheetSyncService {
     }
   }
 
-  suspend fun postponeClass(sessionId: String, isPostponed: Boolean, reason: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+  suspend fun postponeClass(sessionId: String, isPostponed: Boolean, reason: String? = null, sessions: List<LiveClassSession>? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+    if (sessions != null) {
+      return@withContext syncLiveClasses(sessions)
+    }
     try {
       val json = JSONObject().apply {
         put("action", "postponeClass")
@@ -198,7 +201,10 @@ class GoogleSheetSyncService {
     }
   }
 
-  suspend fun rescheduleClass(sessionId: String, newDate: String, newStartTime: String, newEndTime: String, reason: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+  suspend fun rescheduleClass(sessionId: String, newDate: String, newStartTime: String, newEndTime: String, reason: String? = null, sessions: List<LiveClassSession>? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+    if (sessions != null) {
+      return@withContext syncLiveClasses(sessions)
+    }
     try {
       val json = JSONObject().apply {
         put("action", "rescheduleClass")
@@ -303,6 +309,11 @@ class GoogleSheetSyncService {
   suspend fun syncExams(exams: List<OnlineExam>): Result<Boolean> = withContext(Dispatchers.IO) {
     val arr = buildExamsTable(exams)
     syncTables(mapOf("Exams" to arr))
+  }
+
+  suspend fun syncQuestions(questions: List<ExamQuestion>): Result<Boolean> = withContext(Dispatchers.IO) {
+    val arr = buildQuestionsTable(questions)
+    syncTables(mapOf("Question_Bank" to arr))
   }
 
   suspend fun syncSubmissions(submissions: List<ExamSubmission>): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -556,6 +567,58 @@ class GoogleSheetSyncService {
     return arr
   }
 
+  fun buildQuestionsTable(questions: List<ExamQuestion>): JSONArray {
+    val arr = JSONArray()
+    val header = JSONArray().apply {
+      put("Question ID")
+      put("Course ID")
+      put("Academic Class")
+      put("Subject")
+      put("Topic")
+      put("Marks")
+      put("Difficulty")
+      put("Question Text")
+      put("Option A")
+      put("Option B")
+      put("Option C")
+      put("Option D")
+      put("Correct Option Index")
+      put("Code Snippet")
+      put("Explanation")
+      put("Created At")
+    }
+    arr.put(header)
+    for (q in questions) {
+      val correctIdx = when (q.correctOption.uppercase()) {
+        "A" -> 0
+        "B" -> 1
+        "C" -> 2
+        "D" -> 3
+        else -> 0
+      }
+      val row = JSONArray().apply {
+        put(q.id)
+        put(q.courseId ?: "all")
+        put(q.academicClass ?: "")
+        put(q.subject)
+        put(q.topic)
+        put(q.marks)
+        put(q.difficulty)
+        put(q.questionText)
+        put(q.optionA)
+        put(q.optionB)
+        put(q.optionC)
+        put(q.optionD)
+        put(correctIdx)
+        put(q.codeSnippet ?: "")
+        put(q.explanation ?: "")
+        put(q.createdAt)
+      }
+      arr.put(row)
+    }
+    return arr
+  }
+
   fun buildExamsTable(exams: List<OnlineExam>): JSONArray {
     val arr = JSONArray()
     val header = JSONArray().apply {
@@ -573,24 +636,41 @@ class GoogleSheetSyncService {
       put("Status")
       put("Mode")
       put("Scheduled Date")
+      put("Start Time")
+      put("End Time")
+      put("Question Count")
+      put("Question IDs")
+      put("Instructions")
+      put("Published")
+      put("Created At")
     }
     arr.put(header)
     for (e in exams) {
+      val qCount = if (!e.questionIds.isNullOrBlank()) {
+        e.questionIds.split(",", ";", " ").filter { it.isNotBlank() }.size
+      } else 0
       val row = JSONArray().apply {
         put(e.id)
-        put(e.id)
+        put(if (e.examCode.isNotBlank()) e.examCode else e.id)
         put(e.title)
-        put(e.courseId ?: "")
-        put(e.batchId ?: "")
-        put("Class 11")
+        put(e.courseId ?: "all")
+        put(e.batchId ?: "all")
+        put(e.academicClass.ifBlank { "All Classes" })
         put(e.subject)
         put(e.durationMinutes)
         put(e.totalMarks)
-        put((e.totalMarks * 0.4).toInt())
-        put("40%")
+        put(e.passingMarks)
+        put(e.passingPercentage)
         put(e.status)
-        put("Online CBT")
+        put(e.mode)
         put(e.scheduledDate)
+        put(e.startTime)
+        put(e.endTime)
+        put(qCount)
+        put(e.questionIds ?: "")
+        put(e.instructions ?: "")
+        put(if (e.isPublished) "Yes" else "No")
+        put(e.createdAt)
       }
       arr.put(row)
     }
@@ -602,22 +682,40 @@ class GoogleSheetSyncService {
     val header = JSONArray().apply {
       put("Submission ID")
       put("Exam ID")
+      put("Exam Title")
       put("Student ID")
       put("Student Name")
-      put("Score")
+      put("Roll No")
+      put("Aadhaar No")
+      put("Course ID")
+      put("Batch ID")
+      put("Score Obtained")
       put("Total Marks")
+      put("Percentage (%)")
+      put("Result Status")
+      put("Time Spent (Secs)")
       put("Submitted At")
+      put("Answers Summary")
     }
     arr.put(header)
     for (s in submissions) {
       val row = JSONArray().apply {
         put(s.id)
         put(s.examId)
+        put("")
         put(s.studentId)
         put(s.studentName)
+        put("")
+        put("")
+        put("")
+        put("")
         put(s.score)
         put(s.totalMarks)
+        put(s.percentage)
+        put(if (s.passed) "PASSED" else "NEEDS IMPROVEMENT")
+        put(s.timeSpentSeconds)
         put(s.submittedAt)
+        put(s.answersJson)
       }
       arr.put(row)
     }
@@ -1169,30 +1267,50 @@ class GoogleSheetSyncService {
       val row = arr.optJSONArray(i) ?: continue
       val id = optCell(row, 0)
       if (id.isBlank()) continue
+      val examCode = optCell(row, 1)
       val title = optCell(row, 2).ifBlank { optCell(row, 1) }
       if (title.isBlank()) continue
       val courseId = optCell(row, 3).ifBlank { null }
       val batchId = optCell(row, 4).ifBlank { null }
+      val academicClass = optCell(row, 5)
       val subject = optCell(row, 6).ifBlank { optCell(row, 2).ifBlank { "General" } }
       val duration = (optCell(row, 7).ifBlank { optCell(row, 5) }).toIntOrNull() ?: 30
       val totalMarks = (optCell(row, 8).ifBlank { optCell(row, 4) }).toIntOrNull() ?: 20
-      val status = optCell(row, 11).ifBlank { optCell(row, 7).ifBlank { "published" } }
+      val passingMarks = optCell(row, 9).toIntOrNull() ?: ((totalMarks * 4) / 10).coerceAtLeast(1)
+      val passingPercentage = optCell(row, 10).toIntOrNull() ?: 40
+      val status = optCell(row, 11).ifBlank { optCell(row, 7).ifBlank { "active" } }
       val rawDate = optCell(row, 13).ifBlank { optCell(row, 6) }
       val schedDate = cleanDateOrTime(rawDate)
+      val startTime = optCell(row, 14).ifBlank { "10:00 AM" }
+      val endTime = optCell(row, 15).ifBlank { "11:00 AM" }
       val qIds = optCell(row, 17).ifBlank { null }
+      val instructions = optCell(row, 18).ifBlank { null }
+      val isPublished = optCell(row, 19).equals("Yes", ignoreCase = true) ||
+                        optCell(row, 19).equals("TRUE", ignoreCase = true) ||
+                        status.equals("active", ignoreCase = true) ||
+                        status.equals("scheduled", ignoreCase = true) ||
+                        status.equals("published", ignoreCase = true)
 
       list.add(
         OnlineExam(
           id = id,
           title = title,
+          examCode = examCode,
           subject = subject,
           courseId = courseId,
           batchId = batchId,
+          academicClass = academicClass,
           totalMarks = totalMarks,
+          passingMarks = passingMarks,
+          passingPercentage = passingPercentage,
           durationMinutes = duration,
           scheduledDate = schedDate,
+          startTime = startTime,
+          endTime = endTime,
           status = status,
-          questionIds = qIds
+          isPublished = isPublished,
+          questionIds = qIds,
+          instructions = instructions
         )
       )
     }
@@ -1207,69 +1325,78 @@ class GoogleSheetSyncService {
       val id = optCell(row, 0)
       if (id.isBlank()) continue
 
-      // Support both Google Sheets Question_Bank format:
-      // Index 0: Question ID, 1: Course ID, 2: Academic Class, 3: Subject, 4: Topic, 5: Marks,
-      // 7: Question Text, 8: Option A, 9: Option B, 10: Option C, 11: Option D, 12: Correct Option Index
-      // and legacy format (Index 1: Exam ID, 2: Question Text, 3..6: Options, 7: Correct, 8: Marks)
       val isQuestionBankSchema = row.length() >= 12 && (optCell(row, 7).isNotBlank() || optCell(row, 8).isNotBlank())
-
-      val courseId: String?
-      val examId: String
-      val qText: String
-      val optA: String
-      val optB: String
-      val optC: String
-      val optD: String
-      val correctOpt: String
-      val marks: Int
 
       if (isQuestionBankSchema) {
         val courseVal = optCell(row, 1)
-        courseId = courseVal.ifBlank { null }
-        examId = optCell(row, 14).ifBlank { optCell(row, 4) }
-        marks = optCell(row, 5).toIntOrNull() ?: 2
-        val rawText = optCell(row, 7)
-        val snippet = optCell(row, 13)
-        qText = if (snippet.isNotBlank()) "$rawText\n\n$snippet" else rawText
-        optA = optCell(row, 8)
-        optB = optCell(row, 9)
-        optC = optCell(row, 10)
-        optD = optCell(row, 11)
+        val courseId = courseVal.ifBlank { null }
+        val academicClass = optCell(row, 2).ifBlank { null }
+        val subject = optCell(row, 3).ifBlank { "General" }
+        val topic = optCell(row, 4)
+        val marks = optCell(row, 5).toIntOrNull() ?: 2
+        val difficulty = optCell(row, 6).ifBlank { "medium" }
+        val qText = optCell(row, 7)
+        val optA = optCell(row, 8)
+        val optB = optCell(row, 9)
+        val optC = optCell(row, 10)
+        val optD = optCell(row, 11)
         val rawCorrect = optCell(row, 12).trim()
-        correctOpt = when (rawCorrect) {
+        val correctOpt = when (rawCorrect) {
           "0" -> "A"
           "1" -> "B"
           "2" -> "C"
           "3" -> "D"
           else -> if (rawCorrect.isNotBlank()) rawCorrect.uppercase() else "A"
         }
-      } else {
-        courseId = null
-        examId = optCell(row, 1)
-        qText = optCell(row, 2)
-        optA = optCell(row, 3)
-        optB = optCell(row, 4)
-        optC = optCell(row, 5)
-        optD = optCell(row, 6)
-        correctOpt = optCell(row, 7).ifBlank { "A" }.uppercase()
-        marks = optCell(row, 8).toIntOrNull() ?: 1
-      }
+        val snippet = optCell(row, 13).ifBlank { null }
+        val explanation = optCell(row, 14).ifBlank { null }
 
-      if (qText.isBlank()) continue
-      list.add(
-        ExamQuestion(
-          id = id,
-          examId = examId,
-          questionText = qText,
-          optionA = optA,
-          optionB = optB,
-          optionC = optC,
-          optionD = optD,
-          correctOption = correctOpt,
-          marks = marks,
-          courseId = courseId
+        if (qText.isBlank()) continue
+
+        list.add(
+          ExamQuestion(
+            id = id,
+            examId = "",
+            questionText = qText,
+            optionA = optA,
+            optionB = optB,
+            optionC = optC,
+            optionD = optD,
+            correctOption = correctOpt,
+            marks = marks,
+            courseId = courseId,
+            academicClass = academicClass,
+            subject = subject,
+            topic = topic,
+            codeSnippet = snippet,
+            explanation = explanation,
+            difficulty = difficulty
+          )
         )
-      )
+      } else {
+        val examId = optCell(row, 1)
+        val qText = optCell(row, 2)
+        val optA = optCell(row, 3)
+        val optB = optCell(row, 4)
+        val optC = optCell(row, 5)
+        val optD = optCell(row, 6)
+        val correctOpt = optCell(row, 7).ifBlank { "A" }.uppercase()
+        val marks = optCell(row, 8).toIntOrNull() ?: 1
+        if (qText.isBlank()) continue
+        list.add(
+          ExamQuestion(
+            id = id,
+            examId = examId,
+            questionText = qText,
+            optionA = optA,
+            optionB = optB,
+            optionC = optC,
+            optionD = optD,
+            correctOption = correctOpt,
+            marks = marks
+          )
+        )
+      }
     }
     return list
   }

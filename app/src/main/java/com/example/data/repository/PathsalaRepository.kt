@@ -100,6 +100,16 @@ class PathsalaRepository private constructor(private val context: Context) {
   init {
     // Initial fetch from Google Sheet backend
     refreshData()
+
+    // Real-time automatic background polling every 30 seconds while app is open or minimized
+    scope.launch {
+      while (true) {
+        kotlinx.coroutines.delay(30_000L)
+        try {
+          refreshData()
+        } catch (_: Exception) {}
+      }
+    }
   }
 
   fun refreshData() {
@@ -130,10 +140,19 @@ class PathsalaRepository private constructor(private val context: Context) {
 
         // Keep logged in student synced
         _currentStudent.value?.let { current ->
-          dto.students?.find { it.id == current.id }?.let { updated ->
-            _currentStudent.value = updated
-            localStore.saveLoggedInStudent(updated)
-          }
+          val updatedStudent = dto.students?.find { it.id == current.id } ?: current
+          _currentStudent.value = updatedStudent
+          localStore.saveLoggedInStudent(updatedStudent)
+
+          // Automatically sync class schedule and postpone notification in real-time
+          val classes = dto.liveClasses ?: _liveClasses.value
+          val bts = dto.batches ?: _batches.value
+          com.example.util.NotificationHelper.syncStudentClassNotification(
+            context = context,
+            student = updatedStudent,
+            liveClasses = classes,
+            batches = bts
+          )
         }
       }.onFailure { err ->
         _lastSyncError.value = err.localizedMessage ?: "Sync error"
@@ -575,51 +594,141 @@ class PathsalaRepository private constructor(private val context: Context) {
     }
   }
 
+  fun addExam(exam: OnlineExam) {
+    val current = _exams.value.filterNot { it.id == exam.id }
+    val updated = listOf(exam) + current
+    _exams.value = updated
+    localStore.saveExams(updated)
+    scope.launch {
+      sheetService.syncExams(updated)
+    }
+  }
+
+  fun updateExam(exam: OnlineExam) {
+    val updated = _exams.value.map { if (it.id == exam.id) exam else it }
+    _exams.value = updated
+    localStore.saveExams(updated)
+    scope.launch {
+      sheetService.syncExams(updated)
+    }
+  }
+
+  fun deleteExam(examId: String) {
+    val updated = _exams.value.filterNot { it.id == examId }
+    _exams.value = updated
+    localStore.saveExams(updated)
+    scope.launch {
+      sheetService.syncExams(updated)
+    }
+  }
+
+  fun toggleExamPublish(examId: String) {
+    val target = _exams.value.firstOrNull { it.id == examId } ?: return
+    val updated = target.copy(isPublished = !target.isPublished)
+    updateExam(updated)
+  }
+
+  fun addQuestion(question: ExamQuestion) {
+    val current = _questions.value.filterNot { it.id == question.id }
+    val updated = listOf(question) + current
+    _questions.value = updated
+    localStore.saveQuestions(updated)
+    scope.launch {
+      sheetService.syncQuestions(updated)
+    }
+  }
+
+  fun updateQuestion(question: ExamQuestion) {
+    val updated = _questions.value.map { if (it.id == question.id) question else it }
+    _questions.value = updated
+    localStore.saveQuestions(updated)
+    scope.launch {
+      sheetService.syncQuestions(updated)
+    }
+  }
+
+  fun deleteQuestion(questionId: String) {
+    val updated = _questions.value.filterNot { it.id == questionId }
+    _questions.value = updated
+    localStore.saveQuestions(updated)
+    scope.launch {
+      sheetService.syncQuestions(updated)
+    }
+  }
+
+  fun deleteExamSubmission(submissionId: String) {
+    val updated = _submissions.value.filterNot { it.id == submissionId }
+    _submissions.value = updated
+    localStore.saveExamSubmissions(updated)
+    scope.launch {
+      sheetService.syncSubmissions(updated)
+    }
+  }
+
   fun getQuestionsForExam(exam: OnlineExam): List<ExamQuestion> {
     val result = mutableListOf<ExamQuestion>()
     val seenIds = mutableSetOf<String>()
-    val seenTexts = mutableSetOf<String>()
 
     fun addIfValid(q: ExamQuestion) {
       val textClean = q.questionText.trim()
-      // Skip only completely blank questions
       if (textClean.isBlank()) return
-      val normText = textClean.lowercase()
-      if (q.id !in seenIds && normText !in seenTexts) {
+      if (q.id !in seenIds) {
         seenIds.add(q.id)
-        seenTexts.add(normText)
         result.add(q)
       }
     }
 
-    // 1. Direct examId match from DB Question_Bank
-    _questions.value.filter { it.examId.equals(exam.id, ignoreCase = true) }.forEach { addIfValid(it) }
-
-    // 2. Specific question IDs linked in exam row (e.g., 'q-1790696496989-957')
+    // 1. Explicit questions attached to this exam by questionIds (from Question_Bank table)
     if (!exam.questionIds.isNullOrBlank()) {
-      val ids = exam.questionIds.split(",", ";", " ").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-      _questions.value.filter { it.id in ids }.forEach { addIfValid(it) }
-    }
-
-    // 3. Questions matching this exam's course from DB Question_Bank
-    if (!exam.courseId.isNullOrBlank()) {
-      _questions.value.filter { it.courseId.equals(exam.courseId, ignoreCase = true) }.forEach { addIfValid(it) }
-    }
-
-    // 4. Any other questions in DB Question_Bank
-    _questions.value.forEach { addIfValid(it) }
-
-    // 5. Augment with syllabus curriculum question bank only if fewer than 5 questions
-    if (result.size < 5) {
-      val standardQuestions = com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
-      for (q in standardQuestions) {
-        if (result.size >= 12) break
-        addIfValid(q)
+      val ids = exam.questionIds
+        .replace("[", "")
+        .replace("]", "")
+        .replace("\"", "")
+        .split(",", ";", "\n")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+      for (id in ids) {
+        val q = _questions.value.firstOrNull { it.id.equals(id, ignoreCase = true) }
+        if (q != null) addIfValid(q)
       }
     }
 
+    // 2. Direct examId match
+    _questions.value.filter { it.examId.isNotBlank() && it.examId.equals(exam.id, ignoreCase = true) }.forEach { addIfValid(it) }
+
+    // 3. Questions matching this exam's course & subject
+    if (!exam.courseId.isNullOrBlank() && !exam.courseId.equals("all", ignoreCase = true)) {
+      _questions.value.filter {
+        (it.courseId.equals(exam.courseId, ignoreCase = true) || it.courseId.equals("all", ignoreCase = true)) &&
+        (it.subject.equals(exam.subject, ignoreCase = true) || exam.subject.contains(it.subject, ignoreCase = true))
+      }.forEach { addIfValid(it) }
+    }
+
+    // 4. Any questions in DB matching course
+    if (result.isEmpty() && !exam.courseId.isNullOrBlank() && !exam.courseId.equals("all", ignoreCase = true)) {
+      _questions.value.filter { it.courseId.equals(exam.courseId, ignoreCase = true) || it.courseId.equals("all", ignoreCase = true) }
+        .forEach { addIfValid(it) }
+    }
+
+    // 5. If result is still empty, load from initial seed questions bank
     if (result.isEmpty()) {
-      return com.example.util.ExamQuestionsProvider.getQuestionsForExam(exam)
+      val seeds = com.example.data.seed.SeedExamData.INITIAL_QUESTIONS
+      if (!exam.questionIds.isNullOrBlank()) {
+        val ids = exam.questionIds
+          .replace("[", "")
+          .replace("]", "")
+          .replace("\"", "")
+          .split(",", ";", "\n")
+          .map { it.trim() }
+          .filter { it.isNotEmpty() }
+        seeds.filter { it.id in ids }.forEach { addIfValid(it) }
+      }
+      if (result.isEmpty()) {
+        seeds.filter { it.courseId == null || it.courseId == "all" || it.courseId == exam.courseId }.forEach { addIfValid(it) }
+      }
+      if (result.isEmpty()) {
+        seeds.forEach { addIfValid(it) }
+      }
     }
 
     return result
@@ -764,8 +873,7 @@ class PathsalaRepository private constructor(private val context: Context) {
       com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, updatedSession, showToast = false)
 
       scope.launch {
-        sheetService.rescheduleClass(sessionId, newDate, newStartTime, newEndTime, reason)
-        sheetService.syncLiveClasses(_liveClasses.value)
+        sheetService.syncLiveClasses(updated)
       }
     }
   }

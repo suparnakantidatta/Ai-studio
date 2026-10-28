@@ -37,6 +37,9 @@ fun AdminAcademicTab(
   studyMaterials: List<StudyMaterial>,
   courses: List<Course>,
   batches: List<Batch>,
+  exams: List<com.example.data.model.OnlineExam> = emptyList(),
+  questions: List<com.example.data.model.ExamQuestion> = emptyList(),
+  submissions: List<com.example.data.model.ExamSubmission> = emptyList(),
   onAddClass: (LiveClassSession) -> Unit,
   onUpdateClass: (LiveClassSession) -> Unit,
   onDeleteClass: (String) -> Unit,
@@ -45,9 +48,16 @@ fun AdminAcademicTab(
   onDeleteNote: (String) -> Unit,
   onTogglePostpone: (String, Boolean, String?) -> Unit = { _, _, _ -> },
   onRescheduleClass: (String, String, String, String, String?) -> Unit = { _, _, _, _, _ -> },
-  onSendNotification: (LiveClassSession) -> Unit = {}
+  onSendNotification: (LiveClassSession) -> Unit = {},
+  onAddExam: (com.example.data.model.OnlineExam) -> Unit = {},
+  onUpdateExam: (com.example.data.model.OnlineExam) -> Unit = {},
+  onDeleteExam: (String) -> Unit = {},
+  onToggleExamPublish: (String) -> Unit = {},
+  onAddQuestion: (com.example.data.model.ExamQuestion) -> Unit = {},
+  onDeleteQuestion: (String) -> Unit = {},
+  onDeleteSubmission: (String) -> Unit = {}
 ) {
-  var activeSubTab by remember { mutableIntStateOf(0) } // 0: Scheduled Classes, 1: Notes as Web Portal
+  var activeSubTab by remember { mutableIntStateOf(0) } // 0: Classes, 1: Notes, 2: Online Exams
 
   var showAddClassDialog by remember { mutableStateOf(false) }
   var editingClass by remember { mutableStateOf<LiveClassSession?>(null) }
@@ -110,7 +120,21 @@ fun AdminAcademicTab(
           leadingIcon = {
             Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
           },
-          label = { Text("Notes & Web Portal (${studyMaterials.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+          label = { Text("Notes (${studyMaterials.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = BrandPrimary,
+            selectedLabelColor = Color.White
+          ),
+          modifier = Modifier.weight(1f)
+        )
+
+        FilterChip(
+          selected = activeSubTab == 2,
+          onClick = { activeSubTab = 2 },
+          leadingIcon = {
+            Icon(Icons.Default.Quiz, contentDescription = null, modifier = Modifier.size(16.dp))
+          },
+          label = { Text("Exams (${exams.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
           colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = BrandPrimary,
             selectedLabelColor = Color.White
@@ -393,7 +417,7 @@ fun AdminAcademicTab(
           }
         }
       }
-    } else {
+    } else if (activeSubTab == 1) {
       // NOTES AS WEB PORTAL VIEW
       LazyColumn(
         modifier = Modifier
@@ -530,6 +554,21 @@ fun AdminAcademicTab(
           }
         }
       }
+    } else {
+      AdminOnlineExamManager(
+        exams = exams,
+        questions = questions,
+        submissions = submissions,
+        courses = courses,
+        batches = batches,
+        onAddExam = onAddExam,
+        onUpdateExam = onUpdateExam,
+        onDeleteExam = onDeleteExam,
+        onToggleExamPublish = onToggleExamPublish,
+        onAddQuestion = onAddQuestion,
+        onDeleteQuestion = onDeleteQuestion,
+        onDeleteSubmission = onDeleteSubmission
+      )
     }
   }
 

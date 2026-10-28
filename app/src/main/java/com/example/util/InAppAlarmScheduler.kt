@@ -35,12 +35,12 @@ object InAppAlarmScheduler {
       // Ring ONLY 30 minutes before class start
       val targetAlarmMillis = classStartTimeMillis - 30 * 60 * 1000L
 
-      val triggerMillis = if (targetAlarmMillis > now) {
-        targetAlarmMillis
-      } else {
-        // Class is starting in less than 30 minutes: alert promptly in 3 seconds
-        now + 3000L
+      if (targetAlarmMillis <= now) {
+        // Advance 30-min window has already passed; do not trigger immediately
+        return
       }
+
+      val triggerMillis = targetAlarmMillis
 
       val intent = Intent(context, ClassAlarmReceiver::class.java).apply {
         putExtra("title", session.title)
@@ -82,6 +82,27 @@ object InAppAlarmScheduler {
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
       )
       alarmManager.cancel(pendingIntent)
+    } catch (_: Exception) {}
+  }
+
+  const val SYNC_ALARM_REQ_CODE = 9901
+
+  fun scheduleNextSyncAlarm(context: Context) {
+    try {
+      val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+      val intent = Intent(context, ClassSyncReceiver::class.java)
+      val pendingIntent = PendingIntent.getBroadcast(
+        context,
+        SYNC_ALARM_REQ_CODE,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+      )
+      val triggerMillis = System.currentTimeMillis() + 15 * 60 * 1000L // 15 minutes
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
+      } else {
+        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
+      }
     } catch (_: Exception) {}
   }
 

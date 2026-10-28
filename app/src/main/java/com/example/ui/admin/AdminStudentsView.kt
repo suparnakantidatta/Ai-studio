@@ -58,45 +58,13 @@ fun AdminStudentsView(
     list
   }
 
-  if (statusFilter == "tracker") {
-    // Live Tracker & Games view
-    Column(modifier = Modifier.fillMaxSize()) {
-      Surface(
-        color = Color.White,
-        tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Text(
-            text = "Student Device & Gaming Telemetry",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = Slate900
-          )
-          OutlinedButton(
-            onClick = { statusFilter = "all" },
-            shape = RoundedCornerShape(8.dp)
-          ) {
-            Text("Back to Directory", fontSize = 12.sp)
-          }
-        }
-      }
-      AdminTelemetryTrackerTab(students = students, telemetries = telemetries)
-    }
-  } else {
-    // Directory View matching Screenshot 2
-    LazyColumn(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
+  // Directory View matching Screenshot 2
+  LazyColumn(
+    modifier = Modifier
+      .fillMaxSize()
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(14.dp)
+  ) {
       // Header matching Screenshot 2
       item {
         Row(
@@ -191,20 +159,6 @@ fun AdminStudentsView(
                 colors = FilterChipDefaults.filterChipColors(
                   selectedContainerColor = Slate200,
                   selectedLabelColor = Slate900
-                )
-              )
-
-              FilterChip(
-                selected = false,
-                onClick = { statusFilter = "tracker" },
-                leadingIcon = {
-                  Icon(Icons.Default.Smartphone, contentDescription = null, modifier = Modifier.size(14.dp))
-                },
-                label = { Text("Device Tracker", fontSize = 12.sp) },
-                shape = RoundedCornerShape(8.dp),
-                colors = FilterChipDefaults.filterChipColors(
-                  containerColor = BrandGoldLight.copy(alpha = 0.5f),
-                  labelColor = BrandGoldDark
                 )
               )
             }
@@ -453,15 +407,6 @@ fun AdminStudentsView(
               }
 
               Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                  onClick = { statusFilter = "tracker" },
-                  contentPadding = PaddingValues(horizontal = 6.dp)
-                ) {
-                  Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = BrandPrimary, modifier = Modifier.size(14.dp))
-                  Spacer(modifier = Modifier.width(4.dp))
-                  Text("Tracker", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Bold)
-                }
-
                 IconButton(
                   onClick = { onDeleteStudent(st.id) },
                   modifier = Modifier.size(36.dp)
@@ -474,5 +419,4 @@ fun AdminStudentsView(
         }
       }
     }
-  }
 }

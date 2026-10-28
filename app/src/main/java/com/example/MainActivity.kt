@@ -21,6 +21,8 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+    com.example.util.NotificationHelper.createNotificationChannels(this)
+    com.example.util.InAppAlarmScheduler.scheduleNextSyncAlarm(this)
 
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
       val processName = android.app.Application.getProcessName()
