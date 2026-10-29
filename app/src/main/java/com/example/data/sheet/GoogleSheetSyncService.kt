@@ -50,20 +50,43 @@ class GoogleSheetSyncService {
 
   suspend fun pushNewPayment(payment: FeePayment): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
+      val cleanDate = cleanDateOrTime(payment.paymentDate)
       val json = JSONObject().apply {
-        put("action", "recordPayment")
+        put("action", "addPayment")
         put("receiptNo", payment.receiptNo)
         put("paymentId", payment.id)
+        put("id", payment.id)
         put("studentId", payment.studentId)
         put("studentName", payment.studentName)
         put("amount", payment.finalAmountPaid)
+        put("finalAmountPaid", payment.finalAmountPaid)
         put("paymentMode", payment.paymentMode)
         put("monthsCovered", payment.monthsCovered.joinToString(", "))
+        put("month", payment.month)
         put("transactionRef", payment.transactionRef ?: "")
         put("status", payment.status)
-        put("paymentDate", payment.paymentDate)
+        put("paymentDate", cleanDate)
         put("approvedBy", payment.approvedBy ?: "")
         put("remarks", payment.remarks ?: "")
+        
+        // Also provide nested payment object for web Apps Script compatibility
+        val payObj = JSONObject().apply {
+          put("id", payment.id)
+          put("receiptNo", payment.receiptNo)
+          put("studentId", payment.studentId)
+          put("studentName", payment.studentName)
+          put("amount", payment.finalAmountPaid)
+          put("finalAmountPaid", payment.finalAmountPaid)
+          put("paymentMode", payment.paymentMode)
+          put("monthsCovered", JSONArray(payment.monthsCovered))
+          put("month", payment.month)
+          put("transactionRef", payment.transactionRef ?: "")
+          put("paymentDate", cleanDate)
+          put("status", payment.status)
+          put("approvedBy", payment.approvedBy ?: "")
+          put("remarks", payment.remarks ?: "")
+        }
+        put("payment", payObj)
       }
 
       postJson(json)
@@ -114,11 +137,14 @@ class GoogleSheetSyncService {
 
   suspend fun pushNewStudent(student: Student): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
+      val cleanAdmDate = cleanDateOrTime(student.admissionDate)
       val json = JSONObject().apply {
         put("action", "addStudent")
         put("studentId", student.id)
+        put("id", student.id)
         put("rollNo", student.rollNo)
         put("name", student.name)
+        put("studentName", student.name)
         put("mobile", student.mobile)
         put("aadhaarNo", student.aadhaarNo)
         put("email", student.email ?: "")
@@ -127,9 +153,76 @@ class GoogleSheetSyncService {
         put("address", student.address)
         put("courseId", student.courseId)
         put("batchId", student.batchId)
-        put("admissionDate", student.admissionDate)
+        put("admissionDate", cleanAdmDate)
         put("status", student.status)
         put("customFee", student.customMonthlyFeeOverride ?: "")
+        put("customMonthlyFeeOverride", student.customMonthlyFeeOverride ?: "")
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun approveAdmission(applicationId: String, student: Student, payment: FeePayment?): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val cleanAdmDate = cleanDateOrTime(student.admissionDate)
+      val json = JSONObject().apply {
+        put("action", "approveAdmission")
+        put("applicationId", applicationId)
+        val stuObj = JSONObject().apply {
+          put("id", student.id)
+          put("rollNo", student.rollNo)
+          put("name", student.name)
+          put("studentName", student.name)
+          put("mobile", student.mobile)
+          put("aadhaarNo", student.aadhaarNo)
+          put("email", student.email ?: "")
+          put("guardianName", student.guardianName)
+          put("guardianPhone", student.guardianPhone)
+          put("address", student.address)
+          put("courseId", student.courseId)
+          put("batchId", student.batchId)
+          put("admissionDate", cleanAdmDate)
+          put("status", student.status)
+          put("customMonthlyFeeOverride", student.customMonthlyFeeOverride ?: "")
+        }
+        put("student", stuObj)
+        if (payment != null) {
+          val cleanPayDate = cleanDateOrTime(payment.paymentDate)
+          val payObj = JSONObject().apply {
+            put("id", payment.id)
+            put("receiptNo", payment.receiptNo)
+            put("studentId", payment.studentId)
+            put("studentName", payment.studentName)
+            put("finalAmountPaid", payment.finalAmountPaid)
+            put("amount", payment.finalAmountPaid)
+            put("paymentMode", payment.paymentMode)
+            put("monthsCovered", JSONArray(payment.monthsCovered))
+            put("month", payment.month)
+            put("transactionRef", payment.transactionRef ?: "")
+            put("paymentDate", cleanPayDate)
+            put("status", payment.status)
+            put("approvedBy", payment.approvedBy ?: "Admin (Application Approval)")
+            put("remarks", payment.remarks ?: "")
+          }
+          put("payment", payObj)
+          put("isPaid", true)
+        }
+      }
+      postJson(json)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun rejectAdmission(applicationId: String, reason: String): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val json = JSONObject().apply {
+        put("action", "rejectAdmission")
+        put("applicationId", applicationId)
+        put("reason", reason)
+        put("rejectionReason", reason)
       }
       postJson(json)
     } catch (e: Exception) {
@@ -348,7 +441,7 @@ class GoogleSheetSyncService {
         put(p.paymentMode)
         put(p.month.ifBlank { p.monthsCovered.joinToString(", ") })
         put(p.transactionRef ?: "")
-        put(p.paymentDate)
+        put(cleanDateOrTime(p.paymentDate))
         put(p.status)
         put(p.approvedBy ?: "")
         put(p.rejectionReason ?: "")
@@ -395,7 +488,7 @@ class GoogleSheetSyncService {
         put(s.address)
         put(s.courseId)
         put(s.batchId)
-        put(s.admissionDate)
+        put(cleanDateOrTime(s.admissionDate))
         put(s.status)
         put(s.customMonthlyFeeOverride ?: "")
         put(baseFee)
@@ -468,7 +561,7 @@ class GoogleSheetSyncService {
         put(e.category)
         put(e.title)
         put(e.amount)
-        put(e.expenseDate)
+        put(cleanDateOrTime(e.expenseDate))
         put(e.approvedBy)
         put(e.paymentMode)
         put(e.id)
@@ -508,7 +601,7 @@ class GoogleSheetSyncService {
         put(s.courseId ?: "")
         put(s.batchId ?: "")
         put(s.educatorName)
-        put(s.scheduledDate)
+        put(cleanDateOrTime(s.scheduledDate))
         put(s.startTime)
         put(s.endTime)
         put(if (s.isPostponed) "postponed" else s.status)
@@ -554,7 +647,7 @@ class GoogleSheetSyncService {
         put(a.guardianPhone)
         put(a.targetCourseId)
         put(a.status)
-        put(a.appliedDate)
+        put(cleanDateOrTime(a.appliedDate))
         put(a.initialPaymentStatus)
         put(a.initialPaymentMode)
         put(a.initialPaymentRef ?: "")
@@ -825,14 +918,20 @@ class GoogleSheetSyncService {
     for (i in 1 until arr.length()) {
       val row = arr.optJSONArray(i) ?: continue
       val id = optCell(row, 0)
-      val title = optCell(row, 1)
-      if (id.isBlank() || title.isBlank()) continue
-      val category = optCell(row, 2).ifBlank { "General" }
+      if (id.isBlank()) continue
+      val col1 = optCell(row, 1)
+      val col2 = optCell(row, 2)
+      // Web project & buildExpensesTable: col 1 = Category, col 2 = Title / Description
+      val (category, title) = if (col2.isNotBlank()) {
+        Pair(col1.ifBlank { "General" }, col2)
+      } else {
+        Pair("General", col1.ifBlank { "Expense #$i" })
+      }
       val amount = optCell(row, 3).toDoubleOrNull() ?: 0.0
-      val date = optCell(row, 4)
-      val mode = optCell(row, 5).ifBlank { "CASH" }
-      val approvedBy = optCell(row, 6).ifBlank { "Admin" }
-      val remarks = optCell(row, 7)
+      val date = cleanDateOrTime(optCell(row, 4))
+      val approvedBy = optCell(row, 5).ifBlank { "Admin" }
+      val mode = optCell(row, 6).ifBlank { "CASH" }
+      val remarks = optCell(row, 8).ifBlank { optCell(row, 7) }
       list.add(
         Expense(
           id = id,
@@ -872,7 +971,7 @@ class GoogleSheetSyncService {
       val address = optCell(row, 8)
       val courseId = optCell(row, 9)
       val batchId = optCell(row, 10)
-      val admissionDate = optCell(row, 11)
+      val admissionDate = cleanDateOrTime(optCell(row, 11))
       val status = optCell(row, 12).ifBlank { "active" }
       val customFee = optCell(row, 13).toDoubleOrNull()
       val totalPaid = optCell(row, 15).toDoubleOrNull()
@@ -970,7 +1069,7 @@ class GoogleSheetSyncService {
       val monthsCoveredRaw = optCell(row, 6)
       val monthsList = monthsCoveredRaw.split(",").map { it.trim() }.filter { it.isNotBlank() }
       val txRef = optCell(row, 7)
-      val paymentDate = optCell(row, 8)
+      val paymentDate = cleanDateOrTime(optCell(row, 8))
       val status = optCell(row, 9).ifBlank { "approved" }
       val approvedBy = optCell(row, 10)
       val rejectionReason = optCell(row, 11)
@@ -1112,7 +1211,7 @@ class GoogleSheetSyncService {
       val guardianPhone = optCell(row, 6)
       val targetCourseId = optCell(row, 7)
       val status = optCell(row, 8).ifBlank { "pending" }
-      val appliedDate = optCell(row, 9)
+      val appliedDate = cleanDateOrTime(optCell(row, 9))
       val initStatus = optCell(row, 10).ifBlank { "paid_advance" }
       val mode = optCell(row, 11).ifBlank { "CASH" }
       val txRef = optCell(row, 12)
@@ -1145,24 +1244,8 @@ class GoogleSheetSyncService {
     return list
   }
 
-  private fun cleanDateOrTime(raw: String): String {
-    if (raw.isBlank()) return raw
-    if (raw.contains("T") && raw.endsWith("Z")) {
-      if (raw.startsWith("1899-") || raw.startsWith("1900-")) {
-        return try {
-          val timePart = raw.substringAfter("T").substringBefore(".").substringBefore("Z")
-          val parts = timePart.split(":")
-          val h = parts[0].toIntOrNull() ?: 10
-          val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
-          val ampm = if (h >= 12) "PM" else "AM"
-          val h12 = if (h % 12 == 0) 12 else if (h > 12) h - 12 else h
-          String.format(java.util.Locale.US, "%02d:%02d %s", h12, m, ampm)
-        } catch (_: Exception) { raw }
-      } else {
-        return raw.substringBefore("T")
-      }
-    }
-    return raw
+  fun cleanDateOrTime(raw: String): String {
+    return FeeCalculator.parseIsoOrDateToCleanDate(raw)
   }
 
   private fun parseLiveClasses(arr: JSONArray?): List<LiveClassSession> {

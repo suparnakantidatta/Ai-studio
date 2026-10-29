@@ -9,6 +9,66 @@ object FeeCalculator {
 
   private val IST_TIMEZONE = TimeZone.getTimeZone("Asia/Kolkata")
 
+  fun getCurrentDate(): String {
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+      timeZone = IST_TIMEZONE
+    }
+    return sdf.format(Date())
+  }
+
+  fun parseIsoOrDateToCleanDate(raw: String?): String {
+    if (raw.isNullOrBlank()) return ""
+    val trimmed = raw.trim()
+
+    // 1. If already in YYYY-MM-DD format
+    if (trimmed.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))) {
+      return trimmed
+    }
+
+    // 2. If in ISO 8601 UTC timestamp format e.g. "2026-10-27T18:30:00.000Z"
+    if (trimmed.contains("T")) {
+      if (trimmed.startsWith("1899-") || trimmed.startsWith("1900-")) {
+        return try {
+          val timePart = trimmed.substringAfter("T").substringBefore(".").substringBefore("Z")
+          val parts = timePart.split(":")
+          val h = parts[0].toIntOrNull() ?: 10
+          val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+          val ampm = if (h >= 12) "PM" else "AM"
+          val h12 = if (h % 12 == 0) 12 else if (h > 12) h - 12 else h
+          String.format(Locale.US, "%02d:%02d %s", h12, m, ampm)
+        } catch (_: Exception) { trimmed }
+      }
+      try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+          timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val clean = trimmed.split(".")[0].replace("Z", "")
+        val date = sdf.parse(clean)
+        if (date != null) {
+          val outSdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = IST_TIMEZONE
+          }
+          return outSdf.format(date)
+        }
+      } catch (_: Exception) {
+        return trimmed.substringBefore("T")
+      }
+    }
+
+    // 3. Try DD/MM/YYYY or DD-MM-YYYY
+    try {
+      val slashParts = trimmed.split("/", "-")
+      if (slashParts.size == 3) {
+        val y = if (slashParts[0].length == 4) slashParts[0] else slashParts[2]
+        val m = slashParts[1].padStart(2, '0')
+        val d = if (slashParts[0].length == 4) slashParts[2].padStart(2, '0') else slashParts[0].padStart(2, '0')
+        return "$y-$m-$d"
+      }
+    } catch (_: Exception) {}
+
+    return trimmed
+  }
+
   fun parseIsoOrMonthToYearMonth(raw: String?): String? {
     if (raw.isNullOrBlank()) return null
     val trimmed = raw.trim()

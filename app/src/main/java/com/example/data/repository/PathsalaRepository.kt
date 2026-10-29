@@ -276,10 +276,7 @@ class PathsalaRepository private constructor(private val context: Context) {
     val netPayable = maxOf(0.0, totalBase - totalDiscount)
     val receiptNo = FeeCalculator.generateReceiptNo(_payments.value)
     val paymentId = "pay-${System.currentTimeMillis()}"
-
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-      timeZone = TimeZone.getTimeZone("UTC")
-    }
+    val paymentDateStr = FeeCalculator.getCurrentDate()
 
     val payment = FeePayment(
       id = paymentId,
@@ -301,7 +298,7 @@ class PathsalaRepository private constructor(private val context: Context) {
       paymentMode = paymentMode,
       transactionRef = transactionRef,
       status = "approved",
-      paymentDate = sdf.format(Date()),
+      paymentDate = paymentDateStr,
       approvedBy = collectorName,
       remarks = remarks ?: "Fee collection recorded"
     )
@@ -362,10 +359,7 @@ class PathsalaRepository private constructor(private val context: Context) {
     val netPayable = maxOf(0.0, totalBase - totalDiscount)
     val receiptNo = FeeCalculator.generateReceiptNo(_payments.value)
     val paymentId = "pay-${System.currentTimeMillis()}"
-
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-      timeZone = TimeZone.getTimeZone("UTC")
-    }
+    val paymentDateStr = FeeCalculator.getCurrentDate()
 
     val status = if (paymentMode.equals("CASH", ignoreCase = true)) "pending" else "approved"
 
@@ -389,7 +383,7 @@ class PathsalaRepository private constructor(private val context: Context) {
       paymentMode = paymentMode,
       transactionRef = transactionRef,
       status = status,
-      paymentDate = sdf.format(Date()),
+      paymentDate = paymentDateStr,
       approvedBy = if (status == "approved") "Online Gateway" else null,
       remarks = remarks ?: "Online student fee payment"
     )
@@ -469,17 +463,14 @@ class PathsalaRepository private constructor(private val context: Context) {
   suspend fun enrollNewStudent(
     student: Student,
     initialPaymentAmount: Double? = null,
-    initialPaymentMode: String? = null
+    initialPaymentMode: String? = null,
+    admissionAppId: String? = null
   ): Result<Student> {
     val updatedStudents = _students.value + student
     _students.value = updatedStudents
     localStore.saveStudents(updatedStudents)
 
-    scope.launch {
-      sheetService.pushNewStudent(student)
-      sheetService.syncStudents(_students.value, _courses.value)
-    }
-
+    var createdPayment: FeePayment? = null
     if (initialPaymentAmount != null && initialPaymentAmount > 0) {
       val receiptNo = FeeCalculator.generateReceiptNo(_payments.value)
       val payment = FeePayment(
@@ -499,15 +490,27 @@ class PathsalaRepository private constructor(private val context: Context) {
         finalAmountPaid = initialPaymentAmount,
         paymentMode = initialPaymentMode ?: "CASH",
         status = "approved",
-        paymentDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date()),
+        paymentDate = FeeCalculator.getCurrentDate(),
         approvedBy = "Admission Desk",
         remarks = "Initial Admission Fee"
       )
+      createdPayment = payment
       val updatedPayments = _payments.value + payment
       _payments.value = updatedPayments
       localStore.savePayments(updatedPayments)
-      scope.launch {
-        sheetService.pushNewPayment(payment)
+    }
+
+    scope.launch {
+      if (admissionAppId != null) {
+        sheetService.approveAdmission(admissionAppId, student, createdPayment)
+      } else {
+        sheetService.pushNewStudent(student)
+        if (createdPayment != null) {
+          sheetService.pushNewPayment(createdPayment)
+        }
+      }
+      sheetService.syncStudents(_students.value, _courses.value)
+      if (createdPayment != null) {
         sheetService.syncFeeTransactions(_payments.value)
       }
     }
@@ -533,7 +536,7 @@ class PathsalaRepository private constructor(private val context: Context) {
       address = app.address,
       courseId = courseId ?: app.targetCourseId,
       batchId = batchId ?: (_batches.value.firstOrNull { it.courseId == (courseId ?: app.targetCourseId) }?.id ?: "batch-1"),
-      admissionDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date()),
+      admissionDate = FeeCalculator.getCurrentDate(),
       admissionMonth = FeeCalculator.getCurrentYearMonth(),
       status = "active"
     )
@@ -552,7 +555,8 @@ class PathsalaRepository private constructor(private val context: Context) {
     return enrollNewStudent(
       student = newStudent,
       initialPaymentAmount = app.initialPaymentAmount,
-      initialPaymentMode = app.initialPaymentMode
+      initialPaymentMode = app.initialPaymentMode,
+      admissionAppId = applicationId
     )
   }
 
@@ -564,6 +568,7 @@ class PathsalaRepository private constructor(private val context: Context) {
     _admissions.value = updatedApps
     localStore.saveAdmissions(updatedApps)
     scope.launch {
+      sheetService.rejectAdmission(applicationId, reason)
       sheetService.syncAdmissions(updatedApps)
     }
     return Result.success(true)

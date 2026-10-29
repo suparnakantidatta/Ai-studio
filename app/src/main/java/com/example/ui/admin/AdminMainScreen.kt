@@ -2405,7 +2405,7 @@ fun NewAdmissionDialog(
             address = address,
             courseId = selectedCourseId,
             batchId = selectedBatchId.ifBlank { "batch-1" },
-            admissionDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date()),
+            admissionDate = FeeCalculator.getCurrentDate(),
             admissionMonth = FeeCalculator.getCurrentYearMonth(),
             status = "active"
           )
