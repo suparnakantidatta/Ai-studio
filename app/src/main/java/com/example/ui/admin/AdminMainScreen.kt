@@ -62,6 +62,7 @@ fun AdminMainScreen(
   val expenses by repository.expenses.collectAsState()
   val telemetries by repository.studentTelemetries.collectAsState()
   val isSyncing by repository.isSyncing.collectAsState()
+  val isDarkMode by repository.isDarkMode.collectAsState()
 
   var viewReceiptPayment by remember { mutableStateOf<FeePayment?>(null) }
   var showManageDiscountsDialog by remember { mutableStateOf(false) }
@@ -116,8 +117,10 @@ fun AdminMainScreen(
               tint = if (isSyncing) BrandGold else Color.White
             )
           }
-          val isDarkMode by repository.isDarkMode.collectAsState()
-          IconButton(onClick = { repository.toggleDarkMode() }) {
+          IconButton(
+            onClick = { repository.toggleDarkMode() },
+            modifier = Modifier.testTag("admin_dark_mode_toggle")
+          ) {
             Icon(
               imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
               contentDescription = "Toggle Dark Mode",
@@ -132,7 +135,7 @@ fun AdminMainScreen(
     },
     bottomBar = {
       NavigationBar(
-        containerColor = Color.White,
+        containerColor = if (isDarkMode) Color(0xFF1E293B) else Color.White,
         tonalElevation = 8.dp
       ) {
         NavigationBarItem(
@@ -192,7 +195,7 @@ fun AdminMainScreen(
       modifier = Modifier
         .fillMaxSize()
         .padding(padding)
-        .background(Slate50)
+        .background(if (isDarkMode) Color(0xFF0F172A) else Slate50)
     ) {
       when (selectedTab) {
         0 -> AdminOverviewTab(

@@ -69,7 +69,6 @@ fun AdminAcademicTab(
 
   var selectedBatchFilter by remember { mutableStateOf<String?>(null) }
   var postponingSession by remember { mutableStateOf<LiveClassSession?>(null) }
-  var postponeReasonText by remember { mutableStateOf("") }
   var notifConfirmationSession by remember { mutableStateOf<LiveClassSession?>(null) }
 
   var reschedulingSession by remember { mutableStateOf<LiveClassSession?>(null) }
@@ -284,7 +283,7 @@ fun AdminAcademicTab(
                       Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(16.dp))
                       Spacer(modifier = Modifier.width(6.dp))
                       Text(
-                        text = "Notice: ${session.postponeReason ?: "Class postponed by faculty."}",
+                        text = "Status: Class postponed by faculty",
                         fontSize = 12.sp,
                         color = ErrorRed,
                         fontWeight = FontWeight.Medium
@@ -321,7 +320,6 @@ fun AdminAcademicTab(
                         onCheckedChange = { isChecked ->
                           if (isChecked) {
                             postponingSession = session
-                            postponeReasonText = session.postponeReason ?: "Postponed due to center maintenance / reschedule"
                           } else {
                             onTogglePostpone(session.id, false, null)
                             Toast.makeText(context, "Class schedule restored to Active", Toast.LENGTH_SHORT).show()
@@ -633,28 +631,17 @@ fun AdminAcademicTab(
         }
       },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          Text(
-            text = "Enter a notice/reason for students explaining why this session is postponed:",
-            fontSize = 13.sp,
-            color = Slate600
-          )
-          OutlinedTextField(
-            value = postponeReasonText,
-            onValueChange = { postponeReasonText = it },
-            label = { Text("Postpone Notice / Reason *") },
-            placeholder = { Text("e.g. Faculty medical leave / Center holiday") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-          )
-        }
+        Text(
+          text = "Are you sure you want to mark this class as Postponed for students? The schedule status will be updated to Postponed.",
+          fontSize = 14.sp,
+          color = Slate600
+        )
       },
       confirmButton = {
         Button(
           onClick = {
-            val reasonClean = postponeReasonText.trim().ifBlank { "Postponed by center administration" }
-            onTogglePostpone(session.id, true, reasonClean)
-            Toast.makeText(context, "Class marked as Postponed with student notice", Toast.LENGTH_SHORT).show()
+            onTogglePostpone(session.id, true, null)
+            Toast.makeText(context, "Class marked as Postponed", Toast.LENGTH_SHORT).show()
             postponingSession = null
           },
           colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
@@ -755,7 +742,7 @@ fun AdminAcademicTab(
   if (notifConfirmationSession != null) {
     val session = notifConfirmationSession!!
     val batch = batches.firstOrNull { it.id == session.batchId }
-    val msg = "📢 Pixel Pathsala Alert: Class for ${batch?.name ?: session.title} on ${session.scheduledDate} (${session.startTime}) is ${if (session.isPostponed) "POSTPONED: ${session.postponeReason ?: "Rescheduled"}" else "SCHEDULED (Active)"}. Please check your student portal."
+    val msg = "📢 Pixel Pathsala Alert: Class for ${batch?.name ?: session.title} on ${session.scheduledDate} (${session.startTime}) is ${if (session.isPostponed) "POSTPONED" else "SCHEDULED (Active)"}. Please check your student portal."
 
     AlertDialog(
       onDismissRequest = { notifConfirmationSession = null },

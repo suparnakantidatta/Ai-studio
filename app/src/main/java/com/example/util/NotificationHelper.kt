@@ -171,7 +171,7 @@ object NotificationHelper {
 
       val notifTitle = if (isPostponed) "⚠️ Class Postponed: $title" else "📅 Class Scheduled: $title"
       val notifBody = if (isPostponed) {
-        "Notice: ${postponeReason ?: "Session postponed by center faculty"}. Timings: $startTime. Tap for updates."
+        "Status: Class postponed by faculty. Scheduled: $scheduledDate at $startTime. Tap for updates."
       } else {
         "Class scheduled on $scheduledDate at $startTime ($subject - ${batchName ?: "Regular"}). Tap to open."
       }
@@ -204,7 +204,7 @@ object NotificationHelper {
     batchName: String? = null
   ) {
     val isPostponed = session.isPostponed || session.status.equals("postponed", ignoreCase = true)
-    val eventKey = "${session.id}_${if (isPostponed) "postponed" else "scheduled"}_${session.scheduledDate}_${session.startTime}_${session.postponeReason ?: ""}"
+    val eventKey = "${session.id}_${if (isPostponed) "postponed" else "scheduled"}_${session.scheduledDate}_${session.startTime}"
     val prefs = context.getSharedPreferences(PREFS_NOTIF, Context.MODE_PRIVATE)
     val prev = prefs.getString(KEY_LAST_NOTIFIED_PREFIX + session.id, null)
     if (prev == eventKey) {

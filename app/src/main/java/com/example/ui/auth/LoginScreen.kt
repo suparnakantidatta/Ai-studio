@@ -3,6 +3,7 @@ package com.example.ui.auth
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -58,6 +59,7 @@ fun LoginScreen(
   var adminPassword by remember { mutableStateOf("") }
   var adminPasswordVisible by remember { mutableStateOf(false) }
   var adminError by remember { mutableStateOf<String?>(null) }
+  var showAdminHelpDialog by remember { mutableStateOf(false) }
 
   val scrollState = rememberScrollState()
 
@@ -66,15 +68,23 @@ fun LoginScreen(
       .fillMaxSize()
       .background(
         Brush.verticalGradient(
-          colors = listOf(
-            Color(0xFF070B14),
-            Color(0xFF0D1527),
-            Color(0xFF080C18)
-          )
+          colors = if (isDarkMode) {
+            listOf(
+              Color(0xFF070B14),
+              Color(0xFF0D1527),
+              Color(0xFF080C18)
+            )
+          } else {
+            listOf(
+              Color(0xFFEFF6FF),
+              Color(0xFFF8FAFC),
+              Color(0xFFE2E8F0)
+            )
+          }
         )
       )
   ) {
-    // Top bar with Dark mode toggle
+    // Top bar with Dark mode toggle switch
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -83,17 +93,26 @@ fun LoginScreen(
       horizontalArrangement = Arrangement.End,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      IconButton(
-        onClick = { repository.toggleDarkMode() },
+      Row(
         modifier = Modifier
-          .background(Color(0xFF1E293B), CircleShape)
-          .size(38.dp)
+          .clip(RoundedCornerShape(24.dp))
+          .background(if (isDarkMode) Color(0xFF1E293B) else Color.White.copy(alpha = 0.95f))
+          .border(1.dp, if (isDarkMode) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(24.dp))
+          .clickable { repository.toggleDarkMode() }
+          .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
       ) {
         Icon(
-          imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+          imageVector = if (isDarkMode) Icons.Default.DarkMode else Icons.Default.LightMode,
           contentDescription = "Toggle Dark Mode",
-          tint = BrandGold,
-          modifier = Modifier.size(20.dp)
+          tint = if (isDarkMode) BrandGold else BrandPrimary,
+          modifier = Modifier.size(18.dp)
+        )
+        Switch(
+          checked = isDarkMode,
+          onCheckedChange = { repository.toggleDarkMode() },
+          modifier = Modifier.testTag("dark_mode_switch")
         )
       }
     }
@@ -129,7 +148,7 @@ fun LoginScreen(
         Text(
           text = "Coaching ERP & Learning Management System",
           fontSize = 12.sp,
-          color = Slate400,
+          color = if (isDarkMode) Slate400 else Slate600,
           fontWeight = FontWeight.Medium,
           textAlign = TextAlign.Center
         )
@@ -140,8 +159,8 @@ fun LoginScreen(
         Surface(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(16.dp),
-          color = Color(0xFF131D31),
-          border = BorderStroke(1.dp, Color(0xFF1E293B))
+          color = if (isDarkMode) Color(0xFF131D31) else Color(0xFFE2E8F0),
+          border = BorderStroke(1.dp, if (isDarkMode) Color(0xFF1E293B) else Color(0xFFCBD5E1))
         ) {
           Row(
             modifier = Modifier
@@ -168,7 +187,7 @@ fun LoginScreen(
                 Icon(
                   imageVector = Icons.Default.School,
                   contentDescription = null,
-                  tint = if (selectedTab == 0) Color.White else Slate400,
+                  tint = if (selectedTab == 0) Color.White else (if (isDarkMode) Slate400 else Slate600),
                   modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -176,7 +195,7 @@ fun LoginScreen(
                   text = "Student Portal",
                   fontSize = 14.sp,
                   fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
-                  color = if (selectedTab == 0) Color.White else Slate400
+                  color = if (selectedTab == 0) Color.White else (if (isDarkMode) Slate400 else Slate600)
                 )
               }
             }
@@ -201,7 +220,7 @@ fun LoginScreen(
                 Icon(
                   imageVector = Icons.Default.AdminPanelSettings,
                   contentDescription = null,
-                  tint = if (selectedTab == 1) Color.White else Slate400,
+                  tint = if (selectedTab == 1) Color.White else (if (isDarkMode) Slate400 else Slate600),
                   modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -209,7 +228,7 @@ fun LoginScreen(
                   text = "Admin ERP",
                   fontSize = 14.sp,
                   fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
-                  color = if (selectedTab == 1) Color.White else Slate400
+                  color = if (selectedTab == 1) Color.White else (if (isDarkMode) Slate400 else Slate600)
                 )
               }
             }
@@ -222,9 +241,9 @@ fun LoginScreen(
         Card(
           modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 12.dp, shape = RoundedCornerShape(22.dp)),
+            .shadow(elevation = if (isDarkMode) 6.dp else 12.dp, shape = RoundedCornerShape(22.dp)),
           shape = RoundedCornerShape(22.dp),
-          colors = CardDefaults.cardColors(containerColor = Color.White)
+          colors = CardDefaults.cardColors(containerColor = if (isDarkMode) Color(0xFF1E293B) else Color.White)
         ) {
           Column(modifier = Modifier.padding(22.dp)) {
 
@@ -234,13 +253,13 @@ fun LoginScreen(
                 Box(
                   modifier = Modifier
                     .size(36.dp)
-                    .background(Color(0xFFEEF2FF), CircleShape),
+                    .background(if (isDarkMode) Color(0xFF312E81) else Color(0xFFEEF2FF), CircleShape),
                   contentAlignment = Alignment.Center
                 ) {
                   Icon(
                     imageVector = Icons.Default.AdminPanelSettings,
                     contentDescription = null,
-                    tint = BrandPrimary,
+                    tint = if (isDarkMode) BrandGold else BrandPrimary,
                     modifier = Modifier.size(20.dp)
                   )
                 }
@@ -250,12 +269,12 @@ fun LoginScreen(
                     text = "Admin / Educator ERP",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Slate900
+                    color = if (isDarkMode) Color.White else Slate900
                   )
                   Text(
                     text = "Restricted management access",
                     fontSize = 12.sp,
-                    color = Slate600
+                    color = if (isDarkMode) Slate400 else Slate600
                   )
                 }
               }
@@ -297,7 +316,7 @@ fun LoginScreen(
                 value = adminUsername,
                 onValueChange = { adminUsername = it; adminError = null },
                 label = { Text("Username or Email") },
-                placeholder = { Text("admin") },
+                placeholder = { Text("Enter username or email") },
                 leadingIcon = {
                   Icon(Icons.Default.Person, contentDescription = null, tint = BrandPrimary)
                 },
@@ -314,7 +333,7 @@ fun LoginScreen(
                 value = adminPassword,
                 onValueChange = { adminPassword = it; adminError = null },
                 label = { Text("Password or Security PIN") },
-                placeholder = { Text("admin123 / 7722") },
+                placeholder = { Text("Enter password or PIN") },
                 leadingIcon = {
                   Icon(Icons.Default.Lock, contentDescription = null, tint = BrandPrimary)
                 },
@@ -334,7 +353,39 @@ fun LoginScreen(
                 shape = RoundedCornerShape(12.dp)
               )
 
-              Spacer(modifier = Modifier.height(20.dp))
+              Spacer(modifier = Modifier.height(8.dp))
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "Authorized center staff only",
+                  fontSize = 11.sp,
+                  color = if (isDarkMode) Slate400 else Slate500
+                )
+                TextButton(
+                  onClick = { showAdminHelpDialog = true },
+                  contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.HelpOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                    tint = if (isDarkMode) BrandGold else BrandPrimary
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = "Help",
+                    fontSize = 12.sp,
+                    color = if (isDarkMode) BrandGold else BrandPrimary,
+                    fontWeight = FontWeight.SemiBold
+                  )
+                }
+              }
+
+              Spacer(modifier = Modifier.height(16.dp))
 
               Button(
                 onClick = {
@@ -349,7 +400,7 @@ fun LoginScreen(
                     adminError = "Invalid admin credentials. Please check username and password."
                   }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                colors = ButtonDefaults.buttonColors(containerColor = if (isDarkMode) BrandPrimary else Color(0xFF0F172A)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
@@ -361,19 +412,30 @@ fun LoginScreen(
                 Text("Sign In to Admin ERP", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
               }
 
+              Spacer(modifier = Modifier.height(12.dp))
+
+              Text(
+                text = "For administrative credentials or access assistance, please contact the center office.",
+                fontSize = 11.sp,
+                color = if (isDarkMode) Slate400 else Slate500,
+                textAlign = TextAlign.Center,
+                lineHeight = 15.sp,
+                modifier = Modifier.fillMaxWidth()
+              )
+
             } else {
               // --- STUDENT PORTAL FORM ---
               Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                   modifier = Modifier
                     .size(36.dp)
-                    .background(Color(0xFFEFF6FF), CircleShape),
+                    .background(if (isDarkMode) Color(0xFF1E3A8A) else Color(0xFFEFF6FF), CircleShape),
                   contentAlignment = Alignment.Center
                 ) {
                   Icon(
                     imageVector = Icons.Default.School,
                     contentDescription = null,
-                    tint = BrandPrimary,
+                    tint = if (isDarkMode) BrandGold else BrandPrimary,
                     modifier = Modifier.size(20.dp)
                   )
                 }
@@ -383,12 +445,12 @@ fun LoginScreen(
                     text = "Student Sign In",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Slate900
+                    color = if (isDarkMode) Color.White else Slate900
                   )
                   Text(
                     text = "Access batch routine, fees, and exams",
                     fontSize = 12.sp,
-                    color = Slate600
+                    color = if (isDarkMode) Slate400 else Slate600
                   )
                 }
               }
@@ -466,7 +528,7 @@ fun LoginScreen(
                   Text(
                     text = "Password is the last 4 digits of your Aadhaar number",
                     fontSize = 11.sp,
-                    color = Slate600
+                    color = if (isDarkMode) Slate400 else Slate600
                   )
                 },
                 singleLine = true,
@@ -507,7 +569,7 @@ fun LoginScreen(
                     studentError = "Student record not found or password incorrect. If you recently applied, please wait for center approval."
                   }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                colors = ButtonDefaults.buttonColors(containerColor = if (isDarkMode) BrandPrimary else Color(0xFF0F172A)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
@@ -527,7 +589,7 @@ fun LoginScreen(
         Text(
           text = "Pixel Pathsala • Coaching ERP System",
           fontSize = 12.sp,
-          color = Slate500,
+          color = if (isDarkMode) Slate400 else Slate500,
           textAlign = TextAlign.Center
         )
       }
@@ -592,6 +654,70 @@ fun LoginScreen(
           colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A))
         ) {
           Text("I Understand")
+        }
+      }
+    )
+  }
+
+  // Admin Access Help Dialog
+  if (showAdminHelpDialog) {
+    AlertDialog(
+      onDismissRequest = { showAdminHelpDialog = false },
+      icon = {
+        Icon(
+          imageVector = Icons.Default.HelpOutline,
+          contentDescription = "Help",
+          tint = BrandPrimary,
+          modifier = Modifier.size(32.dp)
+        )
+      },
+      title = {
+        Text(
+          text = "Admin Access Help",
+          fontWeight = FontWeight.Bold,
+          fontSize = 17.sp,
+          color = Slate900
+        )
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            text = "Administrative and educator access is restricted to coaching center faculty and management personnel.",
+            fontSize = 13.sp,
+            color = Slate600,
+            lineHeight = 18.sp
+          )
+          Surface(
+            color = Color(0xFFF1F5F9),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(
+                text = "• Enter your designated administrator username or official email.",
+                fontSize = 12.sp,
+                color = Slate700
+              )
+              Text(
+                text = "• Enter your master account password or 4-digit security PIN.",
+                fontSize = 12.sp,
+                color = Slate700
+              )
+              Text(
+                text = "• For credential recovery, contact the center office administrator.",
+                fontSize = 12.sp,
+                color = Slate700
+              )
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = { showAdminHelpDialog = false },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A))
+        ) {
+          Text("Understood")
         }
       }
     )

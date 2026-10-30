@@ -268,7 +268,6 @@ class GoogleSheetSyncService {
         put("platform", session.platform)
         put("meetingUrl", session.meetingUrl ?: "")
         put("isPostponed", session.isPostponed)
-        put("postponeReason", session.postponeReason ?: "")
       }
       postJson(json)
     } catch (e: Exception) {
@@ -286,7 +285,6 @@ class GoogleSheetSyncService {
         put("id", sessionId)
         put("isPostponed", isPostponed)
         put("status", if (isPostponed) "postponed" else "scheduled")
-        put("postponeReason", if (isPostponed) (reason ?: "Postponed by center administration") else "")
       }
       postJson(json)
     } catch (e: Exception) {
@@ -307,7 +305,6 @@ class GoogleSheetSyncService {
         put("endTime", newEndTime)
         put("status", "scheduled")
         put("isPostponed", false)
-        put("postponeReason", reason ?: "")
       }
       postJson(json)
     } catch (e: Exception) {
@@ -607,7 +604,7 @@ class GoogleSheetSyncService {
         put(if (s.isPostponed) "postponed" else s.status)
         put(s.platform)
         put(s.meetingUrl ?: "")
-        put(if (s.isPostponed) (s.postponeReason ?: "Postponed by center administration") else "No")
+        put("No")
         put("2026-07-01")
       }
       arr.put(row)
@@ -1258,14 +1255,6 @@ class GoogleSheetSyncService {
       if (id.isBlank() || title.isBlank()) continue
       val rawStatus = optCell(row, 10).ifBlank { "scheduled" }
       val isPostp = rawStatus.equals("postponed", ignoreCase = true)
-      val recOrNotice = optCell(row, 13)
-      val postponeReason = if (isPostp) {
-        if (recOrNotice.isNotBlank() && !recOrNotice.equals("No", ignoreCase = true) && !recOrNotice.equals("Yes", ignoreCase = true)) {
-          recOrNotice
-        } else {
-          "Postponed by center administration"
-        }
-      } else null
 
       list.add(
         LiveClassSession(
@@ -1283,7 +1272,7 @@ class GoogleSheetSyncService {
           platform = optCell(row, 11).ifBlank { "Google Meet" },
           meetingUrl = optCell(row, 12).ifBlank { "https://meet.google.com/new" },
           isPostponed = isPostp,
-          postponeReason = postponeReason
+          postponeReason = null
         )
       )
     }

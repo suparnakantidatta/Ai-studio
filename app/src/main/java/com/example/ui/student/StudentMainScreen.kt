@@ -72,6 +72,7 @@ fun StudentMainScreen(
   val submissions by repository.submissions.collectAsState()
   val isSyncing by repository.isSyncing.collectAsState()
   val feeReminders by repository.feeReminders.collectAsState()
+  val isDarkMode by repository.isDarkMode.collectAsState()
 
   val myReminders = remember(feeReminders, student.id) {
     feeReminders.filter { it.studentId == student.id }
@@ -214,8 +215,7 @@ fun StudentMainScreen(
           // Class schedule or postponement status updated
           knownClassesState[c.id] = currentStatus
           if (currentStatus == "postponed") {
-            val reason = c.postponeReason?.let { ": $it" } ?: ""
-            val msg = "⚠️ Class Postponed: ${c.title} has been postponed$reason"
+            val msg = "⚠️ Class Postponed: ${c.title} has been postponed"
             com.example.util.NotificationHelper.playToastAndSound(context, msg)
           } else {
             val msg = "🔔 Class Update: ${c.title} is now $currentStatus (${c.startTime})"
@@ -290,8 +290,10 @@ fun StudentMainScreen(
               tint = if (isSyncing) BrandGold else Color.White
             )
           }
-          val isDarkMode by repository.isDarkMode.collectAsState()
-          IconButton(onClick = { repository.toggleDarkMode() }) {
+          IconButton(
+            onClick = { repository.toggleDarkMode() },
+            modifier = Modifier.testTag("student_dark_mode_toggle")
+          ) {
             Icon(
               imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
               contentDescription = "Toggle Dark Mode",
@@ -306,7 +308,7 @@ fun StudentMainScreen(
     },
     bottomBar = {
       NavigationBar(
-        containerColor = Color.White,
+        containerColor = if (isDarkMode) Color(0xFF1E293B) else Color.White,
         tonalElevation = 8.dp
       ) {
         NavigationBarItem(
@@ -356,7 +358,7 @@ fun StudentMainScreen(
       modifier = Modifier
         .fillMaxSize()
         .padding(padding)
-        .background(Slate50)
+        .background(if (isDarkMode) Color(0xFF0F172A) else Slate50)
     ) {
       when (selectedTab) {
         0 -> StudentDashboardView(
@@ -650,7 +652,7 @@ fun StudentDashboardView(
               Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(6.dp))
               Text(
-                text = "Reason: ${postponedClass.postponeReason ?: "Postponed by center administration"}",
+                text = "Status: Postponed by center administration",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color(0xFF7F1D1D)
@@ -1067,7 +1069,7 @@ fun StudentDashboardView(
                 Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                  text = "Postponed: ${nextClass.postponeReason ?: "Rescheduled by faculty"}",
+                  text = "Status: Class Postponed",
                   fontSize = 11.sp,
                   color = ErrorRed,
                   fontWeight = FontWeight.SemiBold
@@ -1811,7 +1813,7 @@ fun StudentLiveClassesView(
                   Icon(Icons.Default.Warning, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(16.dp))
                   Spacer(modifier = Modifier.width(6.dp))
                   Text(
-                    text = "Notice: ${session.postponeReason ?: "Class postponed by faculty."}",
+                    text = "Status: Class postponed by faculty",
                     fontSize = 12.sp,
                     color = ErrorRed,
                     fontWeight = FontWeight.SemiBold

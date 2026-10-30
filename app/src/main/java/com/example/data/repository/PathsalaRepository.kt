@@ -830,7 +830,7 @@ class PathsalaRepository private constructor(private val context: Context) {
       val updatedSession = existing.copy(
         isPostponed = isPostponed,
         status = if (isPostponed) "postponed" else "scheduled",
-        postponeReason = if (isPostponed) (reason ?: "Class postponed by faculty") else null,
+        postponeReason = null,
         notificationSent = false
       )
       val updated = _liveClasses.value.map { if (it.id == sessionId) updatedSession else it }
@@ -846,7 +846,7 @@ class PathsalaRepository private constructor(private val context: Context) {
       }
 
       scope.launch {
-        sheetService.postponeClass(sessionId, isPostponed, updatedSession.postponeReason)
+        sheetService.postponeClass(sessionId, isPostponed)
         sheetService.syncLiveClasses(_liveClasses.value)
       }
     }
