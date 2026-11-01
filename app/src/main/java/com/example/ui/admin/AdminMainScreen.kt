@@ -209,7 +209,8 @@ fun AdminMainScreen(
           onNavigateToAdmissions = { selectedTab = 3 },
           onNavigateToOperations = { selectedTab = 4 },
           onOpenNewAdmission = { showNewAdmissionDialog = true },
-          onOpenUpdateDialog = { showUpdateDialog = true }
+          onOpenUpdateDialog = { showUpdateDialog = true },
+          onViewReceipt = { viewReceiptPayment = it }
         )
         1 -> AdminFeeDeskTab(
           students = students,
@@ -533,7 +534,8 @@ fun AdminOverviewTab(
   onNavigateToAdmissions: () -> Unit,
   onNavigateToOperations: () -> Unit,
   onOpenNewAdmission: () -> Unit,
-  onOpenUpdateDialog: () -> Unit
+  onOpenUpdateDialog: () -> Unit,
+  onViewReceipt: (FeePayment) -> Unit = {}
 ) {
   val totalCollected = remember(payments) {
     payments.filter { it.status == "approved" }.sumOf { it.finalAmountPaid }
@@ -785,12 +787,19 @@ fun AdminOverviewTab(
     // Recent Payments
     Text(text = "Recent Transactions", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
     payments.takeLast(6).reversed().forEach { p ->
+      val isRejected = p.status.equals("rejected", ignoreCase = true)
+      val isPending = p.status.equals("pending", ignoreCase = true)
+
       Card(
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+          containerColor = if (isRejected) Color(0xFFFEF2F2) else Color.White
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
-        modifier = Modifier.fillMaxWidth()
+        border = BorderStroke(1.dp, if (isRejected) Color(0xFFFECACA) else Color(0xFFF1F5F9)),
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable { onViewReceipt(p) }
       ) {
         Column(
           modifier = Modifier
@@ -809,25 +818,33 @@ fun AdminOverviewTab(
             ) {
               Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = BrandPrimary.copy(alpha = 0.1f)
+                color = if (isRejected) ErrorRed.copy(alpha = 0.1f) else BrandPrimary.copy(alpha = 0.1f)
               ) {
                 Text(
                   text = "₹${p.finalAmountPaid.toInt()}",
                   fontSize = 13.sp,
                   fontWeight = FontWeight.ExtraBold,
-                  color = BrandPrimary,
+                  color = if (isRejected) ErrorRed else BrandPrimary,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
               }
               Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = if (p.status.equals("approved", ignoreCase = true)) SuccessGreenLight else WarningAmber.copy(alpha = 0.2f)
+                color = when {
+                  isRejected -> ErrorRedLight
+                  isPending -> WarningAmber.copy(alpha = 0.2f)
+                  else -> SuccessGreenLight
+                }
               ) {
                 Text(
                   text = p.status.uppercase(),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = if (p.status.equals("approved", ignoreCase = true)) SuccessGreen else BrandGoldDark,
+                  color = when {
+                    isRejected -> ErrorRed
+                    isPending -> BrandGoldDark
+                    else -> SuccessGreen
+                  },
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
               }
@@ -848,7 +865,7 @@ fun AdminOverviewTab(
               text = p.receiptNo,
               fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
-              color = Slate400
+              color = if (isRejected) ErrorRed else Slate400
             )
           }
 
@@ -862,6 +879,15 @@ fun AdminOverviewTab(
             fontSize = 11.sp,
             color = Slate600
           )
+          if (isRejected && !p.rejectionReason.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+              text = "Rejection Reason: ${p.rejectionReason}",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = ErrorRed
+            )
+          }
         }
       }
     }
@@ -1617,10 +1643,16 @@ fun AdminFeeDeskTab(
     }
 
     items(payments.reversed()) { p ->
+      val isRejected = p.status.equals("rejected", ignoreCase = true)
+      val isPending = p.status.equals("pending", ignoreCase = true)
+
       Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+          containerColor = if (isRejected) Color(0xFFFEF2F2) else Color.White
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = if (isRejected) BorderStroke(1.dp, Color(0xFFFECACA)) else null,
         modifier = Modifier
           .fillMaxWidth()
           .clickable { onViewReceipt(p) }
@@ -1632,14 +1664,61 @@ fun AdminFeeDeskTab(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
-          Column {
-            Text(text = "${p.receiptNo} • ${p.studentName}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Slate900)
+          Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(
+                text = "${p.receiptNo} • ${p.studentName}",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isRejected) ErrorRed else Slate900
+              )
+              Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = when {
+                  isRejected -> ErrorRedLight
+                  isPending -> WarningAmber.copy(alpha = 0.2f)
+                  else -> SuccessGreenLight
+                }
+              ) {
+                Text(
+                  text = p.status.uppercase(),
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = when {
+                    isRejected -> ErrorRed
+                    isPending -> BrandGoldDark
+                    else -> SuccessGreen
+                  },
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+              }
+            }
+            Spacer(modifier = Modifier.height(2.dp))
             Text(text = "Months: ${p.month.ifBlank { p.monthsCovered.joinToString() }}", fontSize = 12.sp, color = Slate600)
-            Text(text = "Mode: ${p.paymentMode} • Status: ${p.status.uppercase()}", fontSize = 11.sp, color = if (p.status == "approved") SuccessGreen else WarningAmber)
+            Text(text = "Mode: ${p.paymentMode}", fontSize = 11.sp, color = Slate600)
+            if (isRejected && !p.rejectionReason.isNullOrBlank()) {
+              Spacer(modifier = Modifier.height(3.dp))
+              Text(
+                text = "Rejection Reason: ${p.rejectionReason}",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ErrorRed
+              )
+            }
           }
           Column(horizontalAlignment = Alignment.End) {
-            Text(text = "₹${p.finalAmountPaid.toInt()}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
-            Text(text = "View Slip", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
+            Text(
+              text = "₹${p.finalAmountPaid.toInt()}",
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold,
+              color = if (isRejected) ErrorRed else SuccessGreen
+            )
+            Text(
+              text = if (isRejected) "View Slip (Rejected)" else "View Slip",
+              fontSize = 11.sp,
+              color = if (isRejected) ErrorRed else BrandPrimary,
+              fontWeight = FontWeight.SemiBold
+            )
           }
         }
       }

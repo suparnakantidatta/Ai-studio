@@ -223,11 +223,19 @@ fun AdminFeeLedgerTab(
           }
         } else {
           items(payments) { p ->
+            val isRejected = p.status.equals("rejected", ignoreCase = true)
+            val isPending = p.status.equals("pending", ignoreCase = true)
+
             Card(
               shape = RoundedCornerShape(16.dp),
-              colors = CardDefaults.cardColors(containerColor = Color.White),
+              colors = CardDefaults.cardColors(
+                containerColor = if (isRejected) Color(0xFFFEF2F2) else Color.White
+              ),
               elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+              border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (isRejected) Color(0xFFFECACA) else Color(0xFFF1F5F9)
+              ),
               modifier = Modifier.fillMaxWidth()
             ) {
               Column(modifier = Modifier.padding(16.dp)) {
@@ -243,25 +251,33 @@ fun AdminFeeLedgerTab(
                   ) {
                     Surface(
                       shape = RoundedCornerShape(8.dp),
-                      color = BrandPrimary.copy(alpha = 0.12f)
+                      color = if (isRejected) ErrorRed.copy(alpha = 0.12f) else BrandPrimary.copy(alpha = 0.12f)
                     ) {
                       Text(
                         text = "₹${p.finalAmountPaid.toInt()}",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = BrandPrimary,
+                        color = if (isRejected) ErrorRed else BrandPrimary,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                       )
                     }
                     Surface(
                       shape = RoundedCornerShape(8.dp),
-                      color = if (p.status.equals("approved", true)) SuccessGreenLight else WarningAmber.copy(alpha = 0.2f)
+                      color = when {
+                        isRejected -> ErrorRedLight
+                        isPending -> WarningAmber.copy(alpha = 0.2f)
+                        else -> SuccessGreenLight
+                      }
                     ) {
                       Text(
                         text = p.status.uppercase(),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (p.status.equals("approved", true)) SuccessGreen else BrandGoldDark,
+                        color = when {
+                          isRejected -> ErrorRed
+                          isPending -> BrandGoldDark
+                          else -> SuccessGreen
+                        },
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                       )
                     }
@@ -282,7 +298,7 @@ fun AdminFeeLedgerTab(
                     text = p.receiptNo,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Slate500
+                    color = if (isRejected) ErrorRed else Slate500
                   )
                 }
 
@@ -295,9 +311,18 @@ fun AdminFeeLedgerTab(
                   fontSize = 12.sp,
                   color = Slate600
                 )
+                if (isRejected && !p.rejectionReason.isNullOrBlank()) {
+                  Spacer(modifier = Modifier.height(3.dp))
+                  Text(
+                    text = "Rejection Reason: ${p.rejectionReason}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ErrorRed
+                  )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider(color = Color(0xFFF1F5F9))
+                HorizontalDivider(color = if (isRejected) Color(0xFFFECACA) else Color(0xFFF1F5F9))
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
@@ -314,13 +339,15 @@ fun AdminFeeLedgerTab(
                   Row(verticalAlignment = Alignment.CenterVertically) {
                     Button(
                       onClick = { onViewReceipt(p) },
-                      colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+                      colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isRejected) ErrorRed else BrandPrimary
+                      ),
                       shape = RoundedCornerShape(8.dp),
                       contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                       Icon(Icons.Default.Receipt, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                       Spacer(modifier = Modifier.width(4.dp))
-                      Text("Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                      Text(if (isRejected) "Receipt (Rejected)" else "Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
 
                     Spacer(modifier = Modifier.width(6.dp))

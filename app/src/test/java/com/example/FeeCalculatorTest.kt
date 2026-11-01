@@ -289,4 +289,49 @@ class FeeCalculatorTest {
     // Total outstanding due should be 150.0
     assertEquals(150.0, summary.totalOutstandingDue, 0.01)
   }
+
+  @Test
+  fun testRejectedPaymentDoesNotCreditDues() {
+    val student = Student(
+      id = "stu-104",
+      rollNo = "PP-104",
+      name = "Amit Sen",
+      mobile = "9988776652",
+      aadhaarNo = "444455556666",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 500.0)
+
+    val rejectedPayment = FeePayment(
+      id = "pay-rej-1",
+      receiptNo = "REC/2026/07-999",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07",
+      monthsCovered = listOf("2026-07"),
+      finalAmountPaid = 500.0,
+      status = "rejected",
+      rejectionReason = "Invalid transaction reference"
+    )
+
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(rejectedPayment),
+      targetUpToMonth = "2026-07"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    // Since payment was rejected, July must remain unpaid with full remaining due
+    assertFalse(july.isPaid)
+    assertFalse(july.isPartiallyPaid)
+    assertEquals(0.0, july.amountPaid, 0.01)
+    assertEquals(500.0, july.remainingDue, 0.01)
+    assertEquals(500.0, summary.totalOutstandingDue, 0.01)
+    assertEquals(1, summary.pendingMonths.size)
+  }
 }

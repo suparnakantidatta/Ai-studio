@@ -1563,9 +1563,15 @@ fun StudentFeesView(
       }
     } else {
       items(allPayments) { pay ->
+        val isRejected = pay.status.equals("rejected", ignoreCase = true)
+        val isPending = pay.status.equals("pending", ignoreCase = true)
+
         Card(
           shape = RoundedCornerShape(12.dp),
-          colors = CardDefaults.cardColors(containerColor = Color.White),
+          colors = CardDefaults.cardColors(
+            containerColor = if (isRejected) Color(0xFFFEF2F2) else Color.White
+          ),
+          border = if (isRejected) BorderStroke(1.dp, Color(0xFFFECACA)) else null,
           elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
           modifier = Modifier
             .fillMaxWidth()
@@ -1578,14 +1584,61 @@ fun StudentFeesView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
           ) {
-            Column {
-              Text(text = "Receipt: ${pay.receiptNo}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+            Column(modifier = Modifier.weight(1f)) {
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                  text = "Receipt: ${pay.receiptNo}",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (isRejected) ErrorRed else BrandPrimary
+                )
+                Surface(
+                  shape = RoundedCornerShape(4.dp),
+                  color = when {
+                    isRejected -> ErrorRedLight
+                    isPending -> WarningAmber.copy(alpha = 0.2f)
+                    else -> SuccessGreenLight
+                  }
+                ) {
+                  Text(
+                    text = pay.status.uppercase(),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = when {
+                      isRejected -> ErrorRed
+                      isPending -> BrandGoldDark
+                      else -> SuccessGreen
+                    },
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+              }
+              Spacer(modifier = Modifier.height(2.dp))
               Text(text = "Months: ${pay.month.ifBlank { pay.monthsCovered.joinToString() }}", fontSize = 11.sp, color = Slate600)
               Text(text = "Mode: ${pay.paymentMode}", fontSize = 11.sp, color = Slate600)
+              if (isRejected && !pay.rejectionReason.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                  text = "Rejection Reason: ${pay.rejectionReason}",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = ErrorRed
+                )
+              }
             }
             Column(horizontalAlignment = Alignment.End) {
-              Text(text = "₹${pay.finalAmountPaid.toInt()}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Slate900)
-              Text(text = "View Slip", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
+              Text(
+                text = "₹${pay.finalAmountPaid.toInt()}",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isRejected) ErrorRed else Slate900
+              )
+              Text(
+                text = if (isRejected) "View Slip (Rejected)" else "View Slip",
+                fontSize = 11.sp,
+                color = if (isRejected) ErrorRed else BrandPrimary,
+                fontWeight = FontWeight.SemiBold
+              )
             }
           }
         }
@@ -1867,12 +1920,20 @@ fun FeeReceiptDialog(
   payment: FeePayment,
   onDismiss: () -> Unit
 ) {
+  val isRejected = payment.status.equals("rejected", ignoreCase = true)
+  val isPending = payment.status.equals("pending", ignoreCase = true)
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = {
       Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Text(text = "PIXEL PATHSALA", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
-        Text(text = "Official Tuition Fee Receipt", fontSize = 12.sp, color = Slate600)
+        Text(
+          text = if (isRejected) "Tuition Fee Receipt [REJECTED]" else "Official Tuition Fee Receipt",
+          fontSize = 12.sp,
+          fontWeight = if (isRejected) FontWeight.Bold else FontWeight.Normal,
+          color = if (isRejected) ErrorRed else Slate600
+        )
       }
     },
     text = {
@@ -1882,13 +1943,107 @@ fun FeeReceiptDialog(
           .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp)
       ) {
+        // Prominent Receipt Status Stamp
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = when {
+            isRejected -> Color(0xFFFEE2E2)
+            isPending -> Color(0xFFFEF3C7)
+            else -> Color(0xFFDCFCE7)
+          },
+          border = BorderStroke(
+            1.5.dp,
+            when {
+              isRejected -> ErrorRed
+              isPending -> Color(0xFFFCD34D)
+              else -> Color(0xFF86EFAC)
+            }
+          ),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                  imageVector = if (isRejected) Icons.Default.Cancel else if (isPending) Icons.Default.HourglassTop else Icons.Default.CheckCircle,
+                  contentDescription = null,
+                  tint = if (isRejected) ErrorRed else if (isPending) Color(0xFFB45309) else SuccessGreen,
+                  modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = when {
+                    isRejected -> "RECEIPT STATUS: REJECTED"
+                    isPending -> "RECEIPT STATUS: PENDING VERIFICATION"
+                    else -> "RECEIPT STATUS: APPROVED & VALID"
+                  },
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 12.sp,
+                  color = when {
+                    isRejected -> ErrorRed
+                    isPending -> Color(0xFFB45309)
+                    else -> SuccessGreen
+                  }
+                )
+              }
+              if (isRejected) {
+                Surface(
+                  shape = RoundedCornerShape(4.dp),
+                  color = ErrorRed
+                ) {
+                  Text(
+                    text = "VOID / REJECTED",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+              }
+            }
+
+            if (isRejected) {
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = "This receipt has been marked as REJECTED and is not credited towards tuition fees.",
+                fontSize = 11.sp,
+                color = Color(0xFF991B1B)
+              )
+              if (!payment.rejectionReason.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                  text = "Reason for Rejection: ${payment.rejectionReason}",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = ErrorRed
+                )
+              }
+            }
+          }
+        }
+
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = Slate100,
+          color = if (isRejected) Color(0xFFFFF1F2) else Slate100,
+          border = if (isRejected) BorderStroke(1.dp, Color(0xFFFECDD3)) else null,
           modifier = Modifier.fillMaxWidth()
         ) {
           Column(modifier = Modifier.padding(10.dp)) {
-            Text(text = "Receipt No: ${payment.receiptNo}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text(
+                text = "Receipt No: ${payment.receiptNo}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = if (isRejected) ErrorRed else Slate900
+              )
+              if (isRejected) {
+                Text(text = "[REJECTED]", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = ErrorRed)
+              }
+            }
             Text(text = "Payment ID: ${payment.id}", fontSize = 11.sp, color = Slate600)
             Text(text = "Date: ${payment.paymentDate}", fontSize = 11.sp, color = Slate600)
           }
@@ -1906,19 +2061,40 @@ fun FeeReceiptDialog(
 
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          Text(text = "Total Amount Paid:", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-          Text(text = "₹${payment.finalAmountPaid.toInt()}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = SuccessGreen)
+          Text(
+            text = if (isRejected) "Submitted Amount (Rejected):" else "Total Amount Paid:",
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            color = if (isRejected) ErrorRed else Slate900
+          )
+          Text(
+            text = if (isRejected) "₹${payment.finalAmountPaid.toInt()} (REJECTED)" else "₹${payment.finalAmountPaid.toInt()}",
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 16.sp,
+            color = if (isRejected) ErrorRed else SuccessGreen
+          )
         }
 
         if (!payment.approvedBy.isNullOrBlank()) {
-          Text(text = "Authorized By: ${payment.approvedBy}", fontSize = 11.sp, color = Slate600)
+          Text(
+            text = if (isRejected) "Rejected By: ${payment.approvedBy}" else "Authorized By: ${payment.approvedBy}",
+            fontSize = 11.sp,
+            fontWeight = if (isRejected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (isRejected) ErrorRed else Slate600
+          )
         }
       }
     },
     confirmButton = {
-      Button(onClick = onDismiss) {
+      Button(
+        onClick = onDismiss,
+        colors = ButtonDefaults.buttonColors(
+          containerColor = if (isRejected) ErrorRed else BrandPrimary
+        )
+      ) {
         Text("Close")
       }
     }
