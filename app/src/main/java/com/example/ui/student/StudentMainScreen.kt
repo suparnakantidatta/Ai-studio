@@ -1,12 +1,18 @@
 package com.example.ui.student
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.AlarmClock
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.asImageBitmap
+import com.example.util.QrCodeHelper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -1257,7 +1263,92 @@ fun StudentDashboardView(
         Text(text = centerInfo.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Slate800)
         Text(text = "${centerInfo.address} • ${centerInfo.tagLine}", fontSize = 12.sp, color = Slate600)
         Text(text = "Helpline & Office: ${centerInfo.phone}", fontSize = 12.sp, color = BrandPrimary)
-        Text(text = "Official UPI ID: ${centerInfo.upiId} (${centerInfo.upiName})", fontSize = 12.sp, color = BrandGoldDark, fontWeight = FontWeight.Medium)
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // UPI ID & Coppiable Container
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = Color(0xFFF1F5F9),
+          border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(text = "Official Center UPI ID:", fontSize = 11.sp, color = Slate600)
+              Text(
+                text = centerInfo.upiId,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = BrandPrimary
+              )
+              Text(text = "Payee: ${centerInfo.upiName}", fontSize = 11.sp, color = Slate500)
+            }
+            IconButton(
+              onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("UPI ID", centerInfo.upiId)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(context, "UPI ID copied: ${centerInfo.upiId}", Toast.LENGTH_SHORT).show()
+              },
+              modifier = Modifier.testTag("copy_home_upi_id_button")
+            ) {
+              Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = "Copy UPI ID",
+                tint = BrandPrimary
+              )
+            }
+          }
+        }
+
+        // Show QR Code directly below UPI ID
+        val upiQrBitmap = remember(centerInfo.upiId, centerInfo.upiName) {
+          QrCodeHelper.generateUpiQrBitmap(
+            upiId = centerInfo.upiId,
+            payeeName = centerInfo.upiName,
+            note = "Pixel Pathsala Fee Payment"
+          )
+        }
+
+        if (upiQrBitmap != null) {
+          Spacer(modifier = Modifier.height(12.dp))
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(Color.White, RoundedCornerShape(12.dp))
+              .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+              .padding(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Text(
+              text = "Center Fee Payment QR Code",
+              fontSize = 13.sp,
+              fontWeight = FontWeight.Bold,
+              color = Slate900
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Image(
+              bitmap = upiQrBitmap.asImageBitmap(),
+              contentDescription = "Center UPI QR Code",
+              modifier = Modifier
+                .size(190.dp)
+                .clip(RoundedCornerShape(8.dp))
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+              text = "Scan with Google Pay, PhonePe, Paytm, BHIM or any UPI app to pay fees",
+              fontSize = 11.sp,
+              color = Slate600,
+              textAlign = TextAlign.Center
+            )
+          }
+        }
       }
     }
   }
@@ -1396,23 +1487,49 @@ fun StudentFeesView(
           Column(horizontalAlignment = Alignment.End) {
             Surface(
               shape = RoundedCornerShape(6.dp),
-              color = if (m.isPaid) SuccessGreenLight else ErrorRedLight
+              color = when {
+                m.isPaid -> SuccessGreenLight
+                m.isPartiallyPaid -> Color(0xFFFEF3C7)
+                else -> ErrorRedLight
+              }
             ) {
               Text(
-                text = if (m.isPaid) "PAID" else "PENDING",
+                text = when {
+                  m.isPaid -> "PAID"
+                  m.isPartiallyPaid -> "PART PAID"
+                  else -> "PENDING"
+                },
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (m.isPaid) SuccessGreen else ErrorRed,
+                color = when {
+                  m.isPaid -> SuccessGreen
+                  m.isPartiallyPaid -> Color(0xFFB45309)
+                  else -> ErrorRed
+                },
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
               )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-              text = "Net: ₹${m.netPayable.toInt()}",
-              fontSize = 13.sp,
-              fontWeight = FontWeight.Bold,
-              color = Slate800
-            )
+            if (m.isPartiallyPaid) {
+              Text(
+                text = "Paid: ₹${m.amountPaid.toInt()}",
+                fontSize = 11.sp,
+                color = Slate600
+              )
+              Text(
+                text = "Due: ₹${m.remainingDue.toInt()}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFB45309)
+              )
+            } else {
+              Text(
+                text = if (m.isPaid) "Paid: ₹${m.netPayable.toInt()}" else "Net: ₹${m.netPayable.toInt()}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Slate800
+              )
+            }
           }
         }
       }
@@ -1485,6 +1602,7 @@ fun StudentPayModal(
   onDismiss: () -> Unit,
   onSubmitPayment: (selectedMonths: List<String>, mode: String, txRef: String?) -> Unit
 ) {
+  val context = LocalContext.current
   val pendingMonths = dues.pendingMonths
   val selectedMonths = remember { mutableStateListOf<String>() }
   var paymentMode by remember { mutableStateOf("UPI") }
@@ -1501,7 +1619,7 @@ fun StudentPayModal(
   val totalSelectedAmount = remember(selectedMonths.toList()) {
     dues.allMonths
       .filter { it.yearMonth in selectedMonths }
-      .sumOf { it.netPayable }
+      .sumOf { it.remainingDue }
   }
 
   AlertDialog(
@@ -1543,12 +1661,45 @@ fun StudentPayModal(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Column(modifier = Modifier.weight(1f)) {
-              Text(text = m.monthLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-              if (m.discountAmount > 0) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = m.monthLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                if (m.isPartiallyPaid) {
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color(0xFFFEF3C7)
+                  ) {
+                    Text(
+                      text = "PART PAID",
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFFB45309),
+                      modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                  }
+                }
+              }
+              if (m.isPartiallyPaid) {
+                Text(
+                  text = "Already Paid: ₹${m.amountPaid.toInt()} (Net: ₹${m.netPayable.toInt()})",
+                  fontSize = 11.sp,
+                  color = Slate600
+                )
+              } else if (m.discountAmount > 0) {
                 Text(text = "${m.discountName}: -₹${m.discountAmount.toInt()}", fontSize = 11.sp, color = BrandGoldDark)
               }
             }
-            Text(text = "₹${m.netPayable.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Column(horizontalAlignment = Alignment.End) {
+              Text(
+                text = "₹${m.remainingDue.toInt()}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (m.isPartiallyPaid) Color(0xFFB45309) else Slate900
+              )
+              if (m.isPartiallyPaid) {
+                Text(text = "Remaining Due", fontSize = 10.sp, color = Slate500)
+              }
+            }
           }
         }
 
@@ -1590,9 +1741,77 @@ fun StudentPayModal(
             modifier = Modifier.fillMaxWidth()
           ) {
             Column(modifier = Modifier.padding(10.dp)) {
-              Text(text = "Center UPI ID: ${centerInfo.upiId}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
-              Text(text = "Payee Name: ${centerInfo.upiName}", fontSize = 11.sp, color = Slate600)
-              Text(text = "Scan or transfer via GPay/PhonePe/Paytm, then enter the 12-digit UTR/Ref number below:", fontSize = 11.sp, color = Slate800)
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(text = "Center UPI ID: ${centerInfo.upiId}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+                  Text(text = "Payee Name: ${centerInfo.upiName}", fontSize = 11.sp, color = Slate600)
+                }
+                IconButton(
+                  onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("UPI ID", centerInfo.upiId)
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(context, "UPI ID copied: ${centerInfo.upiId}", Toast.LENGTH_SHORT).show()
+                  },
+                  modifier = Modifier.size(36.dp).testTag("copy_modal_upi_id_button")
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy UPI ID",
+                    tint = BrandPrimary,
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
+              }
+
+              Spacer(modifier = Modifier.height(8.dp))
+
+              // Pay with UPI App button to launch installed UPI apps (GPay, PhonePe, Paytm, etc.)
+              Button(
+                onClick = {
+                  val upiUri = Uri.parse(
+                    "upi://pay?pa=${Uri.encode(centerInfo.upiId.ifBlank { "pathsala@upi" })}" +
+                    "&pn=${Uri.encode(centerInfo.upiName.ifBlank { "Pathsala Center" })}" +
+                    "&am=${totalSelectedAmount.toInt()}" +
+                    "&cu=INR" +
+                    "&tn=${Uri.encode("Fees - ${student.name}")}"
+                  )
+                  val intent = Intent(Intent.ACTION_VIEW, upiUri)
+                  try {
+                    context.startActivity(intent)
+                  } catch (e: Exception) {
+                    Toast.makeText(context, "No UPI app found on device. You can copy the UPI ID above.", Toast.LENGTH_LONG).show()
+                  }
+                },
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
+                modifier = Modifier.fillMaxWidth().testTag("pay_with_upi_app_button")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.OpenInNew,
+                  contentDescription = null,
+                  tint = Color.White,
+                  modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = "Pay with UPI App",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White
+                )
+              }
+
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(
+                text = "After paying via UPI app, paste or enter the 12-digit UTR/Ref number below:",
+                fontSize = 11.sp,
+                color = Slate800
+              )
             }
           }
 
@@ -1602,7 +1821,7 @@ fun StudentPayModal(
             label = { Text("UPI / UTR Transaction Reference No") },
             placeholder = { Text("e.g. 329482910482") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().testTag("upi_ref_field")
           )
         } else {
           Text(

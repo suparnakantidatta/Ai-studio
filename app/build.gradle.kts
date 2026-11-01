@@ -79,6 +79,7 @@ dependencies {
     implementation(libs.moshi.kotlin)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.androidx.junit)

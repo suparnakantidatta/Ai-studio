@@ -333,7 +333,8 @@ data class MonthFeeDetail(
   val netPayable: Double,
   val amountPaid: Double,
   val remainingDue: Double,
-  val isPaid: Boolean
+  val isPaid: Boolean,
+  val isPartiallyPaid: Boolean = false
 )
 
 data class FeeDuesSummary(

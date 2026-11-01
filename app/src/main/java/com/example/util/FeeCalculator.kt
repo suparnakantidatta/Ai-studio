@@ -254,24 +254,13 @@ object FeeCalculator {
       it.studentId == student.id && it.status.equals("approved", ignoreCase = true)
     }
 
-    // Map which months have been paid
-    val paidMonthsSet = mutableSetOf<String>()
-    approvedPayments.forEach { p ->
-      // If monthsCovered is populated
-      if (p.monthsCovered.isNotEmpty()) {
-        p.monthsCovered.forEach { m ->
-          parseIsoOrMonthToYearMonth(m)?.let { paidMonthsSet.add(it) }
-        }
-      }
-      // Or month field has comma-separated months
-      if (p.month.isNotBlank()) {
-        p.month.split(",").forEach { m ->
-          parseIsoOrMonthToYearMonth(m)?.let { paidMonthsSet.add(it) }
-        }
-      }
-    }
+    // Sort approved payments chronologically
+    val sortedApprovedPayments = approvedPayments.sortedBy { it.paymentDate.ifBlank { it.createdAt ?: "" } }
 
-    val monthDetails = months.map { ym ->
+    // Pre-calculate net payable for all months
+    val monthNetPayableMap = mutableMapOf<String, Double>()
+    val monthDiscountResMap = mutableMapOf<String, DiscountResolution?>()
+    months.forEach { ym ->
       val discountRes = resolveApplicableDiscount(
         student = student,
         course = course,
@@ -280,12 +269,53 @@ object FeeCalculator {
         allDiscounts = discounts,
         baseMonthlyFee = baseMonthlyFee
       )
-
+      monthDiscountResMap[ym] = discountRes
       val discAmt = discountRes?.calculatedDeduction ?: 0.0
-      val net = max(0.0, baseMonthlyFee - discAmt)
-      val isPaid = paidMonthsSet.contains(ym)
-      val paidAmt = if (isPaid) net else 0.0
-      val due = if (isPaid) 0.0 else net
+      monthNetPayableMap[ym] = max(0.0, baseMonthlyFee - discAmt)
+    }
+
+    // Accumulate payments across months
+    val monthPaidAmountMap = mutableMapOf<String, Double>()
+    months.forEach { ym -> monthPaidAmountMap[ym] = 0.0 }
+
+    sortedApprovedPayments.forEach { p ->
+      val pMonths = mutableListOf<String>()
+      if (p.monthsCovered.isNotEmpty()) {
+        p.monthsCovered.forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { pMonths.add(it) } }
+      }
+      if (pMonths.isEmpty() && p.month.isNotBlank()) {
+        p.month.split(",").forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { pMonths.add(it) } }
+      }
+
+      if (pMonths.size == 1) {
+        val ym = pMonths[0]
+        monthPaidAmountMap[ym] = (monthPaidAmountMap[ym] ?: 0.0) + p.finalAmountPaid
+      } else if (pMonths.size > 1) {
+        var remainingPayment = p.finalAmountPaid
+        for (ym in pMonths) {
+          if (remainingPayment <= 0.0) break
+          val net = monthNetPayableMap[ym] ?: baseMonthlyFee
+          val alreadyPaid = monthPaidAmountMap[ym] ?: 0.0
+          val needed = max(0.0, net - alreadyPaid)
+          val allocate = minOf(remainingPayment, needed)
+          monthPaidAmountMap[ym] = alreadyPaid + allocate
+          remainingPayment -= allocate
+        }
+        if (remainingPayment > 0.0) {
+          val lastM = pMonths.last()
+          monthPaidAmountMap[lastM] = (monthPaidAmountMap[lastM] ?: 0.0) + remainingPayment
+        }
+      }
+    }
+
+    val monthDetails = months.map { ym ->
+      val discountRes = monthDiscountResMap[ym]
+      val discAmt = discountRes?.calculatedDeduction ?: 0.0
+      val net = monthNetPayableMap[ym] ?: max(0.0, baseMonthlyFee - discAmt)
+      val paidSoFar = monthPaidAmountMap[ym] ?: 0.0
+      val isFullyPaid = paidSoFar >= (net - 0.01)
+      val remaining = if (isFullyPaid) 0.0 else max(0.0, net - paidSoFar)
+      val isPartPaid = paidSoFar > 0.0 && !isFullyPaid
 
       MonthFeeDetail(
         yearMonth = ym,
@@ -294,9 +324,10 @@ object FeeCalculator {
         discountAmount = discAmt,
         discountName = discountRes?.discountTitle,
         netPayable = net,
-        amountPaid = paidAmt,
-        remainingDue = due,
-        isPaid = isPaid
+        amountPaid = paidSoFar,
+        remainingDue = remaining,
+        isPaid = isFullyPaid,
+        isPartiallyPaid = isPartPaid
       )
     }
 
@@ -307,7 +338,7 @@ object FeeCalculator {
     val totalDisc = monthDetails.sumOf { it.discountAmount }
     val totalNet = monthDetails.sumOf { it.netPayable }
     val totalPaidAmt = monthDetails.sumOf { it.amountPaid }
-    val totalDue = pending.sumOf { it.netPayable }
+    val totalDue = pending.sumOf { it.remainingDue }
 
     return FeeDuesSummary(
       studentId = student.id,

@@ -218,11 +218,12 @@ fun AdminMainScreen(
           discounts = discounts,
           payments = payments,
           centerInfo = centerInfo,
-          onCollectFee = { studentId, months, mode, ref, remarks ->
+          onCollectFee = { studentId, months, customAmount, mode, ref, remarks ->
             coroutineScope.launch {
               repository.collectFeePayment(
                 studentId = studentId,
                 selectedMonths = months,
+                customAmount = customAmount,
                 paymentMode = mode,
                 transactionRef = ref,
                 remarks = remarks,
@@ -875,7 +876,7 @@ fun AdminFeeDeskTab(
   discounts: List<Discount>,
   payments: List<FeePayment>,
   centerInfo: CenterInfo = CenterInfo(),
-  onCollectFee: (studentId: String, months: List<String>, mode: String, ref: String?, remarks: String?) -> Unit,
+  onCollectFee: (studentId: String, months: List<String>, customAmount: Double?, mode: String, ref: String?, remarks: String?) -> Unit,
   onApprovePayment: (paymentId: String) -> Unit,
   onRejectPayment: (FeePayment) -> Unit,
   onOpenDiscountDialog: () -> Unit,
@@ -962,10 +963,16 @@ fun AdminFeeDeskTab(
     }
   }
 
-  val calculatedPayable = remember(selectedMonths.toList(), studentDues) {
+  val calculatedPendingDue = remember(selectedMonths.toList(), studentDues) {
     studentDues?.allMonths
       ?.filter { it.yearMonth in selectedMonths }
-      ?.sumOf { it.netPayable } ?: 0.0
+      ?.sumOf { it.remainingDue } ?: 0.0
+  }
+
+  var customAmountText by remember { mutableStateOf("") }
+
+  LaunchedEffect(calculatedPendingDue) {
+    customAmountText = if (calculatedPendingDue > 0) calculatedPendingDue.toInt().toString() else "0"
   }
 
   val calculatedDiscount = remember(selectedMonths.toList(), studentDues) {
@@ -1415,12 +1422,34 @@ fun AdminFeeDeskTab(
                       )
                     }
                   }
-                  Text(
-                    text = if (m.isPaid) "PAID" else "₹${m.netPayable.toInt()}",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (m.isPaid) SuccessGreen else Slate900
-                  )
+                  Column(horizontalAlignment = Alignment.End) {
+                    if (m.isPaid) {
+                      Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = SuccessGreenLight
+                      ) {
+                        Text("PAID", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = SuccessGreen, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                      }
+                      Text("₹${m.amountPaid.toInt()}", fontSize = 11.sp, color = Slate600)
+                    } else if (m.isPartiallyPaid) {
+                      Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BrandGoldLight
+                      ) {
+                        Text("PART PAID", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = BrandGoldDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                      }
+                      Text("Paid: ₹${m.amountPaid.toInt()}", fontSize = 10.sp, color = SuccessGreen, fontWeight = FontWeight.Medium)
+                      Text("Due: ₹${m.remainingDue.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ErrorRed)
+                    } else {
+                      Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = ErrorRedLight
+                      ) {
+                        Text("DUE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ErrorRed, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                      }
+                      Text("₹${m.netPayable.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate900)
+                    }
+                  }
                 }
               }
             }
@@ -1430,7 +1459,7 @@ fun AdminFeeDeskTab(
               color = Slate100,
               modifier = Modifier.fillMaxWidth()
             ) {
-              Column(modifier = Modifier.padding(12.dp)) {
+              Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                   Text(text = "Selected Months (${selectedMonths.size}):", fontSize = 12.sp, color = Slate600)
                   Text(text = selectedMonths.joinToString(), fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -1441,12 +1470,68 @@ fun AdminFeeDeskTab(
                     Text(text = "-₹${calculatedDiscount.toInt()}", fontSize = 12.sp, color = BrandGoldDark, fontWeight = FontWeight.Bold)
                   }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column {
+                    Text(text = "Total Pending Due:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Slate900)
+                    Text(text = "Calculated from unpaid & part-paid balances", fontSize = 10.sp, color = Slate500)
+                  }
+                  Text(
+                    text = "₹${calculatedPendingDue.toInt()}",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (calculatedPendingDue > 0) ErrorRed else SuccessGreen
+                  )
+                }
+
                 HorizontalDivider(color = Slate200)
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                  Text(text = "Total Collection Amount:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Slate900)
-                  Text(text = "₹${calculatedPayable.toInt()}", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = BrandPrimary)
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(text = "Customized Amount to Collect:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+                  OutlinedButton(
+                    onClick = { customAmountText = calculatedPendingDue.toInt().toString() },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp)
+                  ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Fetch Pending", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
+
+                OutlinedTextField(
+                  value = customAmountText,
+                  onValueChange = { customAmountText = it.filter { ch -> ch.isDigit() } },
+                  label = { Text("Amount to Collect (₹)") },
+                  placeholder = { Text("Enter custom collection amount") },
+                  leadingIcon = { Text("₹", fontWeight = FontWeight.Bold, color = BrandPrimary, modifier = Modifier.padding(start = 12.dp)) },
+                  singleLine = true,
+                  modifier = Modifier.fillMaxWidth().testTag("custom_collection_amount_input")
+                )
+
+                val parsedCustomAmount = customAmountText.toDoubleOrNull() ?: calculatedPendingDue
+                if (parsedCustomAmount < calculatedPendingDue && parsedCustomAmount > 0) {
+                  val remDue = calculatedPendingDue - parsedCustomAmount
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = BrandGoldLight,
+                    modifier = Modifier.fillMaxWidth()
+                  ) {
+                    Text(
+                      text = "Part Payment: Collecting ₹${parsedCustomAmount.toInt()}. Remaining Due of ₹${remDue.toInt()} will be recorded for future collection.",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = BrandGoldDark,
+                      modifier = Modifier.padding(8.dp)
+                    )
+                  }
                 }
               }
             }
@@ -1471,20 +1556,26 @@ fun AdminFeeDeskTab(
               Text(text = messageText!!, fontSize = 12.sp, color = SuccessGreen, fontWeight = FontWeight.Bold)
             }
 
+            val amountToCollect = customAmountText.toDoubleOrNull() ?: calculatedPendingDue
             Button(
               onClick = {
                 if (selectedMonths.isEmpty()) {
                   messageText = "Please select at least one month to collect."
                   return@Button
                 }
+                if (amountToCollect <= 0) {
+                  messageText = "Please enter an amount greater than 0."
+                  return@Button
+                }
                 onCollectFee(
                   selectedStudent!!.id,
                   selectedMonths.toList(),
+                  amountToCollect,
                   paymentMode,
                   transactionRef.ifBlank { null },
-                  remarks.ifBlank { "Center desk fee collection" }
+                  remarks.ifBlank { if (amountToCollect < calculatedPendingDue) "Part payment collected at center desk" else "Center desk fee collection" }
                 )
-                messageText = "Payment recorded successfully! Receipt generated."
+                messageText = "Payment of ₹${amountToCollect.toInt()} recorded successfully! Receipt generated."
               },
               colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
               shape = RoundedCornerShape(12.dp),
@@ -1495,7 +1586,7 @@ fun AdminFeeDeskTab(
             ) {
               Icon(Icons.Default.Receipt, contentDescription = null)
               Spacer(modifier = Modifier.width(8.dp))
-              Text("Collect ₹${calculatedPayable.toInt()} & Issue Receipt", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+              Text("Collect ₹${amountToCollect.toInt()} & Issue Receipt", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
           }
         }

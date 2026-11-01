@@ -133,4 +133,160 @@ class FeeCalculatorTest {
     val newReceipt = FeeCalculator.generateReceiptNo(listOf(payment))
     assertTrue(newReceipt.startsWith("REC/"))
   }
+
+  @Test
+  fun testSingleMonthPartPaymentCalculation() {
+    val student = Student(
+      id = "stu-101",
+      rollNo = "PP-101",
+      name = "Rahul Sharma",
+      mobile = "9988776655",
+      aadhaarNo = "111122223333",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 500.0)
+
+    // Part payment of ₹200 for 2026-07
+    val partPayment = FeePayment(
+      id = "pay-p1",
+      receiptNo = "REC/2026/07-001",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07",
+      monthsCovered = listOf("2026-07"),
+      finalAmountPaid = 200.0,
+      status = "approved"
+    )
+
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(partPayment),
+      targetUpToMonth = "2026-07"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    assertEquals(500.0, july.netPayable, 0.01)
+    assertEquals(200.0, july.amountPaid, 0.01)
+    assertEquals(300.0, july.remainingDue, 0.01)
+    assertFalse(july.isPaid)
+    assertTrue(july.isPartiallyPaid)
+
+    // Outstanding due should be exactly 300.0
+    assertEquals(300.0, summary.totalOutstandingDue, 0.01)
+    // Pending months includes partially paid months
+    assertEquals(1, summary.pendingMonths.size)
+  }
+
+  @Test
+  fun testMultiPartPaymentsCompletingMonth() {
+    val student = Student(
+      id = "stu-102",
+      rollNo = "PP-102",
+      name = "Priya Roy",
+      mobile = "9988776654",
+      aadhaarNo = "222233334444",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 600.0)
+
+    val payment1 = FeePayment(
+      id = "pay-p1",
+      receiptNo = "REC/2026/07-001",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07",
+      monthsCovered = listOf("2026-07"),
+      finalAmountPaid = 250.0,
+      status = "approved"
+    )
+
+    val payment2 = FeePayment(
+      id = "pay-p2",
+      receiptNo = "REC/2026/07-002",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07",
+      monthsCovered = listOf("2026-07"),
+      finalAmountPaid = 350.0,
+      status = "approved"
+    )
+
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(payment1, payment2),
+      targetUpToMonth = "2026-07"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    assertEquals(600.0, july.amountPaid, 0.01)
+    assertEquals(0.0, july.remainingDue, 0.01)
+    assertTrue(july.isPaid)
+    assertFalse(july.isPartiallyPaid)
+    assertEquals(0.0, summary.totalOutstandingDue, 0.01)
+    assertEquals(0, summary.pendingMonths.size)
+  }
+
+  @Test
+  fun testMultiMonthPartialPaymentAllocation() {
+    val student = Student(
+      id = "stu-103",
+      rollNo = "PP-103",
+      name = "Subham Das",
+      mobile = "9988776653",
+      aadhaarNo = "333344445555",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+
+    // Single payment of ₹650 covering both 2026-07 (₹400) and 2026-08 (₹400, so ₹250 paid, ₹150 remaining)
+    val multiPayment = FeePayment(
+      id = "pay-multi",
+      receiptNo = "REC/2026/08-001",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07, 2026-08",
+      monthsCovered = listOf("2026-07", "2026-08"),
+      finalAmountPaid = 650.0,
+      status = "approved"
+    )
+
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(multiPayment),
+      targetUpToMonth = "2026-08"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    val aug = summary.allMonths.first { it.yearMonth == "2026-08" }
+
+    // July should be fully paid
+    assertTrue(july.isPaid)
+    assertFalse(july.isPartiallyPaid)
+    assertEquals(400.0, july.amountPaid, 0.01)
+    assertEquals(0.0, july.remainingDue, 0.01)
+
+    // August should be partially paid
+    assertFalse(aug.isPaid)
+    assertTrue(aug.isPartiallyPaid)
+    assertEquals(250.0, aug.amountPaid, 0.01)
+    assertEquals(150.0, aug.remainingDue, 0.01)
+
+    // Total outstanding due should be 150.0
+    assertEquals(150.0, summary.totalOutstandingDue, 0.01)
+  }
 }

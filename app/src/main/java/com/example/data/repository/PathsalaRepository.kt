@@ -237,6 +237,7 @@ class PathsalaRepository private constructor(private val context: Context) {
   suspend fun collectFeePayment(
     studentId: String,
     selectedMonths: List<String>,
+    customAmount: Double? = null,
     paymentMode: String,
     transactionRef: String?,
     remarks: String?,
@@ -273,10 +274,36 @@ class PathsalaRepository private constructor(private val context: Context) {
       }
     }
 
-    val netPayable = maxOf(0.0, totalBase - totalDiscount)
+    // Calculate pending amount before this payment to know exact remaining pending amount
+    val duesSummaryBefore = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = batch,
+      discounts = _discounts.value,
+      payments = _payments.value
+    )
+    val totalPendingForSelected = duesSummaryBefore.allMonths
+      .filter { it.yearMonth in selectedMonths }
+      .sumOf { it.remainingDue }
+
+    // If customAmount is specified and valid, use it; otherwise use the exact pending due
+    val finalAmountToPay = if (customAmount != null && customAmount >= 0.0) {
+      customAmount
+    } else {
+      totalPendingForSelected
+    }
+
+    val remainingDueAfterPayment = maxOf(0.0, totalPendingForSelected - finalAmountToPay)
     val receiptNo = FeeCalculator.generateReceiptNo(_payments.value)
     val paymentId = "pay-${System.currentTimeMillis()}"
     val paymentDateStr = FeeCalculator.getCurrentDate()
+
+    val formattedRemarks = if (remainingDueAfterPayment > 0.0) {
+      val baseRem = remarks?.ifBlank { "Part fee collection" } ?: "Part fee collection"
+      "$baseRem (Part payment, Due: ₹${remainingDueAfterPayment.toInt()})"
+    } else {
+      remarks ?: "Fee collection recorded"
+    }
 
     val payment = FeePayment(
       id = paymentId,
@@ -293,14 +320,14 @@ class PathsalaRepository private constructor(private val context: Context) {
       totalBaseFee = totalBase,
       totalDiscount = totalDiscount,
       discountBreakdown = discBreakdowns.joinToString("; "),
-      finalAmountPaid = netPayable,
-      remainingDue = 0.0,
+      finalAmountPaid = finalAmountToPay,
+      remainingDue = remainingDueAfterPayment,
       paymentMode = paymentMode,
       transactionRef = transactionRef,
       status = "approved",
       paymentDate = paymentDateStr,
       approvedBy = collectorName,
-      remarks = remarks ?: "Fee collection recorded"
+      remarks = formattedRemarks
     )
 
     // Append to local payments
@@ -356,7 +383,18 @@ class PathsalaRepository private constructor(private val context: Context) {
       }
     }
 
-    val netPayable = maxOf(0.0, totalBase - totalDiscount)
+    val duesSummaryBefore = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = batch,
+      discounts = _discounts.value,
+      payments = _payments.value
+    )
+    val totalPendingForSelected = duesSummaryBefore.allMonths
+      .filter { it.yearMonth in selectedMonths }
+      .sumOf { it.remainingDue }
+
+    val finalAmountToPay = totalPendingForSelected
     val receiptNo = FeeCalculator.generateReceiptNo(_payments.value)
     val paymentId = "pay-${System.currentTimeMillis()}"
     val paymentDateStr = FeeCalculator.getCurrentDate()
@@ -378,13 +416,13 @@ class PathsalaRepository private constructor(private val context: Context) {
       totalBaseFee = totalBase,
       totalDiscount = totalDiscount,
       discountBreakdown = discBreakdowns.joinToString("; "),
-      finalAmountPaid = netPayable,
+      finalAmountPaid = finalAmountToPay,
       remainingDue = 0.0,
       paymentMode = paymentMode,
       transactionRef = transactionRef,
       status = status,
       paymentDate = paymentDateStr,
-      approvedBy = if (status == "approved") "Online Gateway" else null,
+      approvedBy = if (status == "approved") "Online Self / UPI" else null,
       remarks = remarks ?: "Online student fee payment"
     )
 

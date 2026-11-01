@@ -591,9 +591,19 @@ fun AdminFeeLedgerTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
                 dues.allMonths.forEach { m ->
+                  val badgeColor = when {
+                    m.isPaid -> SuccessGreenLight
+                    m.isPartiallyPaid -> BrandGoldLight
+                    else -> ErrorRedLight
+                  }
+                  val badgeTextColor = when {
+                    m.isPaid -> SuccessGreen
+                    m.isPartiallyPaid -> BrandGoldDark
+                    else -> ErrorRed
+                  }
                   Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = if (m.isPaid) SuccessGreenLight else ErrorRedLight
+                    color = badgeColor
                   ) {
                     Column(
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -603,12 +613,17 @@ fun AdminFeeLedgerTab(
                         text = m.monthLabel.split(" ").firstOrNull() ?: m.monthLabel,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (m.isPaid) SuccessGreen else ErrorRed
+                        color = badgeTextColor
                       )
                       Text(
-                        text = if (m.isPaid) "Paid (₹${m.amountPaid.toInt()})" else "Due (₹${m.remainingDue.toInt()})",
+                        text = when {
+                          m.isPaid -> "Paid (₹${m.amountPaid.toInt()})"
+                          m.isPartiallyPaid -> "Part: ₹${m.amountPaid.toInt()} (Due: ₹${m.remainingDue.toInt()})"
+                          else -> "Due (₹${m.remainingDue.toInt()})"
+                        },
                         fontSize = 9.sp,
-                        color = if (m.isPaid) SuccessGreen else ErrorRed
+                        fontWeight = FontWeight.SemiBold,
+                        color = badgeTextColor
                       )
                     }
                   }
