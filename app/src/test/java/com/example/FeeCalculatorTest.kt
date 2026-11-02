@@ -334,4 +334,169 @@ class FeeCalculatorTest {
     assertEquals(500.0, summary.totalOutstandingDue, 0.01)
     assertEquals(1, summary.pendingMonths.size)
   }
+
+  @Test
+  fun testAdvancePaymentRollover() {
+    val student = Student(
+      id = "stu-adv-1",
+      rollNo = "PP-ADV-001",
+      name = "Sneha Paul",
+      mobile = "9876500001",
+      aadhaarNo = "112233445566",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+
+    // Single payment of ₹1000 on month "2026-07"
+    val overpayment = FeePayment(
+      id = "pay-adv-1",
+      receiptNo = "REC/2026/07-ADV",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07",
+      monthsCovered = listOf("2026-07"),
+      finalAmountPaid = 1000.0,
+      status = "approved"
+    )
+
+    // Evaluated up to 2026-08
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(overpayment),
+      targetUpToMonth = "2026-08"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    val aug = summary.allMonths.first { it.yearMonth == "2026-08" }
+
+    // July should be fully paid (₹400)
+    assertTrue(july.isPaid)
+    assertEquals(400.0, july.amountPaid, 0.01)
+
+    // August should also be fully paid via rollover (₹400)
+    assertTrue(aug.isPaid)
+    assertEquals(400.0, aug.amountPaid, 0.01)
+
+    // Remaining ₹200 rolls over to next month (2026-09) which is an advance month!
+    val sep = summary.allMonths.firstOrNull { it.yearMonth == "2026-09" }
+    assertNotNull(sep)
+    assertTrue(sep!!.isAdvance)
+    assertEquals(200.0, sep.amountPaid, 0.01)
+    assertTrue(sep.isPartiallyPaid)
+
+    // Outstanding due for billed months (July & August) should be 0.0
+    assertEquals(0.0, summary.totalOutstandingDue, 0.01)
+    assertEquals(1000.0, summary.totalPaid, 0.01)
+  }
+
+  @Test
+  fun testUnallocatedAdmissionAdvance() {
+    val student = Student(
+      id = "stu-adv-2",
+      rollNo = "PP-ADV-002",
+      name = "Rohan Mitra",
+      mobile = "9876500002",
+      aadhaarNo = "998877665544",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 500.0)
+
+    // Payment without exact YYYY-MM in month string (e.g. Admission Advance)
+    val unallocatedReceipt = FeePayment(
+      id = "pay-adv-general",
+      receiptNo = "REC/2026/ADM-001",
+      studentId = student.id,
+      studentName = student.name,
+      month = "Admission Advance",
+      monthsCovered = emptyList(),
+      finalAmountPaid = 500.0,
+      status = "approved"
+    )
+
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(unallocatedReceipt),
+      targetUpToMonth = "2026-07"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    // July should be credited by the unallocated advance
+    assertTrue(july.isPaid)
+    assertEquals(500.0, july.amountPaid, 0.01)
+    assertEquals(0.0, summary.totalOutstandingDue, 0.01)
+    assertEquals(500.0, summary.totalPaid, 0.01)
+  }
+
+  @Test
+  fun testDiscountBestBenefitResolution() {
+    val student = Student(
+      id = "stu-disc-1",
+      rollNo = "PP-DISC-001",
+      name = "Ananya Sen",
+      mobile = "9876500003",
+      aadhaarNo = "121234345656",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z",
+      monthlyDiscount = 120.0 // Student concession
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+
+    val smallerRule = Discount(
+      id = "disc-small",
+      title = "Small Promotion",
+      type = "flat",
+      value = 80.0,
+      scope = "course",
+      courseId = course.id,
+      applicableMonthsType = "all",
+      active = true
+    )
+
+    // When rule is smaller than student concession, student concession (120) takes precedence
+    val discResolved1 = FeeCalculator.resolveApplicableDiscount(
+      student = student,
+      course = course,
+      batch = null,
+      targetYearMonth = "2026-07",
+      allDiscounts = listOf(smallerRule),
+      baseMonthlyFee = 400.0
+    )
+    assertNotNull(discResolved1)
+    assertEquals(120.0, discResolved1?.calculatedDeduction ?: 0.0, 0.01)
+
+    val biggerRule = Discount(
+      id = "disc-big",
+      title = "Mega Discount",
+      type = "flat",
+      value = 150.0,
+      scope = "course",
+      courseId = course.id,
+      applicableMonthsType = "all",
+      active = true
+    )
+
+    // When rule is bigger than student concession, the bigger discount rule (150) takes precedence
+    val discResolved2 = FeeCalculator.resolveApplicableDiscount(
+      student = student,
+      course = course,
+      batch = null,
+      targetYearMonth = "2026-07",
+      allDiscounts = listOf(biggerRule),
+      baseMonthlyFee = 400.0
+    )
+    assertNotNull(discResolved2)
+    assertEquals(150.0, discResolved2?.calculatedDeduction ?: 0.0, 0.01)
+    assertEquals("Mega Discount", discResolved2?.discountTitle)
+  }
 }

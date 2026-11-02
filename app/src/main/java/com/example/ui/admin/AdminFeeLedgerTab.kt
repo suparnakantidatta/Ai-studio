@@ -541,6 +541,14 @@ fun AdminFeeLedgerTab(
                     fontWeight = FontWeight.Medium,
                     color = SuccessGreen
                   )
+                  if (dues.advanceBalance > 0 || dues.advanceMonthsCount > 0) {
+                    Text(
+                      text = "Advance: ₹${dues.advanceBalance.toInt()}",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = BrandPrimary
+                    )
+                  }
                 }
               }
 
@@ -567,9 +575,14 @@ fun AdminFeeLedgerTab(
                     .padding(8.dp),
                   horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                  Text("Rate: ₹${course?.monthlyFee?.toInt() ?: 400}/mo", fontSize = 11.sp, color = Slate700)
-                  Text("Discount: -₹${st.monthlyDiscount?.toInt() ?: 100}/mo", fontSize = 11.sp, color = BrandGoldDark)
-                  Text("Net: ₹${((course?.monthlyFee ?: 400.0) - (st.monthlyDiscount ?: 0.0)).toInt()}/mo", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+                  val standardRate = dues.standardMonthlyFee
+                  val monthlyDisc = st.monthlyDiscount ?: (dues.allMonths.firstOrNull { it.discountAmount > 0 }?.discountAmount ?: 0.0)
+                  val netMonthly = (standardRate - monthlyDisc).coerceAtLeast(0.0)
+                  Text("Rate: ₹${standardRate.toInt()}/mo", fontSize = 11.sp, color = Slate700)
+                  if (monthlyDisc > 0) {
+                    Text("Discount: -₹${monthlyDisc.toInt()}/mo", fontSize = 11.sp, color = BrandGoldDark)
+                  }
+                  Text("Net: ₹${netMonthly.toInt()}/mo", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
                 }
               }
 
@@ -604,7 +617,8 @@ fun AdminFeeLedgerTab(
 
               // Monthly Status Badges
               Text(
-                text = "Monthly Status (${dues.paidMonths.size} Paid, ${dues.pendingMonths.size} Due):",
+                text = "Monthly Status (${dues.paidMonths.size} Paid, ${dues.pendingMonths.size} Due" +
+                  if (dues.advanceMonthsCount > 0) ", ${dues.advanceMonthsCount} Advance):" else "):",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 color = Slate700
@@ -619,13 +633,17 @@ fun AdminFeeLedgerTab(
               ) {
                 dues.allMonths.forEach { m ->
                   val badgeColor = when {
+                    m.isAdvance && m.isPaid -> Color(0xFFEFF6FF)
                     m.isPaid -> SuccessGreenLight
                     m.isPartiallyPaid -> BrandGoldLight
+                    m.isAdvance -> Color(0xFFF1F5F9)
                     else -> ErrorRedLight
                   }
                   val badgeTextColor = when {
+                    m.isAdvance && m.isPaid -> BrandPrimary
                     m.isPaid -> SuccessGreen
                     m.isPartiallyPaid -> BrandGoldDark
+                    m.isAdvance -> Slate600
                     else -> ErrorRed
                   }
                   Surface(
@@ -644,8 +662,11 @@ fun AdminFeeLedgerTab(
                       )
                       Text(
                         text = when {
+                          m.isAdvance && m.isPaid -> "Adv Paid (₹${m.amountPaid.toInt()})"
                           m.isPaid -> "Paid (₹${m.amountPaid.toInt()})"
+                          m.isAdvance && m.isPartiallyPaid -> "Part Adv: ₹${m.amountPaid.toInt()}"
                           m.isPartiallyPaid -> "Part: ₹${m.amountPaid.toInt()} (Due: ₹${m.remainingDue.toInt()})"
+                          m.isAdvance -> "Advance (₹${m.remainingDue.toInt()})"
                           else -> "Due (₹${m.remainingDue.toInt()})"
                         },
                         fontSize = 9.sp,

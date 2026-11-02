@@ -1396,7 +1396,28 @@ fun StudentFeesView(
             fontWeight = FontWeight.ExtraBold,
             color = if (dues.totalOutstandingDue > 0) BrandGold else SuccessGreen
           )
-          Spacer(modifier = Modifier.height(8.dp))
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "Total Paid: ₹${dues.totalPaid.toInt()}",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = SuccessGreenLight
+            )
+            if (dues.advanceBalance > 0 || dues.advanceMonthsCount > 0) {
+              Text(
+                text = "Advance: ₹${dues.advanceBalance.toInt()} (${dues.advanceMonthsCount} mo)",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = BrandGoldLight
+              )
+            }
+          }
+          Spacer(modifier = Modifier.height(6.dp))
           Text(
             text = "Standard Monthly Fee: ₹${dues.standardMonthlyFee.toInt()} / month",
             fontSize = 12.sp,
@@ -1472,7 +1493,24 @@ fun StudentFeesView(
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
           Column {
-            Text(text = m.monthLabel, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Slate900)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(text = m.monthLabel, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Slate900)
+              if (m.isAdvance) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
+                  shape = RoundedCornerShape(4.dp),
+                  color = Color(0xFFEFF6FF)
+                ) {
+                  Text(
+                    text = "ADVANCE",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BrandPrimary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                  )
+                }
+              }
+            }
             Text(text = "Base Fee: ₹${m.baseFee.toInt()}", fontSize = 11.sp, color = Slate600)
             if (m.discountAmount > 0) {
               Text(
@@ -1488,22 +1526,29 @@ fun StudentFeesView(
             Surface(
               shape = RoundedCornerShape(6.dp),
               color = when {
+                m.isAdvance && m.isPaid -> Color(0xFFEFF6FF)
                 m.isPaid -> SuccessGreenLight
                 m.isPartiallyPaid -> Color(0xFFFEF3C7)
+                m.isAdvance -> Color(0xFFF1F5F9)
                 else -> ErrorRedLight
               }
             ) {
               Text(
                 text = when {
+                  m.isAdvance && m.isPaid -> "PAID (ADV)"
                   m.isPaid -> "PAID"
+                  m.isAdvance && m.isPartiallyPaid -> "PART (ADV)"
                   m.isPartiallyPaid -> "PART PAID"
+                  m.isAdvance -> "UPCOMING"
                   else -> "PENDING"
                 },
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = when {
+                  m.isAdvance && m.isPaid -> BrandPrimary
                   m.isPaid -> SuccessGreen
                   m.isPartiallyPaid -> Color(0xFFB45309)
+                  m.isAdvance -> Slate600
                   else -> ErrorRed
                 },
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1662,10 +1707,14 @@ fun StudentPayModal(
   var transactionRef by remember { mutableStateOf("") }
   var errorText by remember { mutableStateOf<String?>(null) }
 
-  // By default select all pending months if available
+  // By default select all pending months if available, or first advance month if all cleared
   LaunchedEffect(pendingMonths) {
     if (selectedMonths.isEmpty()) {
-      selectedMonths.addAll(pendingMonths.map { it.yearMonth })
+      if (pendingMonths.isNotEmpty()) {
+        selectedMonths.addAll(pendingMonths.map { it.yearMonth })
+      } else {
+        dues.allMonths.firstOrNull { !it.isPaid }?.let { selectedMonths.add(it.yearMonth) }
+      }
     }
   }
 
@@ -1716,6 +1765,21 @@ fun StudentPayModal(
             Column(modifier = Modifier.weight(1f)) {
               Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = m.monthLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                if (m.isAdvance) {
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color(0xFFEFF6FF)
+                  ) {
+                    Text(
+                      text = "ADVANCE",
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = BrandPrimary,
+                      modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                  }
+                }
                 if (m.isPartiallyPaid) {
                   Spacer(modifier = Modifier.width(6.dp))
                   Surface(

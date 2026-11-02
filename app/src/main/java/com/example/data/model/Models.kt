@@ -334,7 +334,8 @@ data class MonthFeeDetail(
   val amountPaid: Double,
   val remainingDue: Double,
   val isPaid: Boolean,
-  val isPartiallyPaid: Boolean = false
+  val isPartiallyPaid: Boolean = false,
+  val isAdvance: Boolean = false
 )
 
 data class FeeDuesSummary(
@@ -351,7 +352,9 @@ data class FeeDuesSummary(
   val totalOutstandingDue: Double,
   val pendingMonths: List<MonthFeeDetail>,
   val paidMonths: List<MonthFeeDetail>,
-  val allMonths: List<MonthFeeDetail>
+  val allMonths: List<MonthFeeDetail>,
+  val advanceBalance: Double = 0.0,
+  val advanceMonthsCount: Int = 0
 )
 
 data class DiscountResolution(

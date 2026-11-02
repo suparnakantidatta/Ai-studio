@@ -1340,6 +1340,13 @@ fun AdminFeeDeskTab(
                       fontSize = 11.sp,
                       color = Slate600
                     )
+                  } else if (studentDues.advanceBalance > 0 || studentDues.advanceMonthsCount > 0) {
+                    Text(
+                      text = "Advance Credit: ₹${studentDues.advanceBalance.toInt()} • ${studentDues.advanceMonthsCount} advance month(s) paid",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = BrandPrimary
+                    )
                   }
                 }
 
@@ -1357,7 +1364,7 @@ fun AdminFeeDeskTab(
                 } else {
                   Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = SuccessGreen
+                    color = if (studentDues.advanceBalance > 0 || studentDues.advanceMonthsCount > 0) BrandPrimary else SuccessGreen
                   ) {
                     Row(
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -1365,7 +1372,12 @@ fun AdminFeeDeskTab(
                     ) {
                       Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                       Spacer(modifier = Modifier.width(4.dp))
-                      Text("PAID", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                      Text(
+                        if (studentDues.advanceMonthsCount > 0) "ADVANCE PAID" else "PAID",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                      )
                     }
                   }
                 }
@@ -1438,7 +1450,24 @@ fun AdminFeeDeskTab(
                   )
                   Spacer(modifier = Modifier.width(6.dp))
                   Column(modifier = Modifier.weight(1f)) {
-                    Text(text = m.monthLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Text(text = m.monthLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                      if (m.isAdvance) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                          shape = RoundedCornerShape(4.dp),
+                          color = Color(0xFFEFF6FF)
+                        ) {
+                          Text(
+                            text = "ADVANCE",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = BrandPrimary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                          )
+                        }
+                      }
+                    }
                     if (m.discountAmount > 0) {
                       Text(
                         text = "${m.discountName ?: "Discount"}: -₹${m.discountAmount.toInt()}",
@@ -1452,9 +1481,15 @@ fun AdminFeeDeskTab(
                     if (m.isPaid) {
                       Surface(
                         shape = RoundedCornerShape(4.dp),
-                        color = SuccessGreenLight
+                        color = if (m.isAdvance) Color(0xFFEFF6FF) else SuccessGreenLight
                       ) {
-                        Text("PAID", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = SuccessGreen, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        Text(
+                          if (m.isAdvance) "PAID (ADV)" else "PAID",
+                          fontSize = 10.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = if (m.isAdvance) BrandPrimary else SuccessGreen,
+                          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                       }
                       Text("₹${m.amountPaid.toInt()}", fontSize = 11.sp, color = Slate600)
                     } else if (m.isPartiallyPaid) {
@@ -1462,16 +1497,28 @@ fun AdminFeeDeskTab(
                         shape = RoundedCornerShape(4.dp),
                         color = BrandGoldLight
                       ) {
-                        Text("PART PAID", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = BrandGoldDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        Text(
+                          if (m.isAdvance) "PART PAID (ADV)" else "PART PAID",
+                          fontSize = 10.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = BrandGoldDark,
+                          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                       }
                       Text("Paid: ₹${m.amountPaid.toInt()}", fontSize = 10.sp, color = SuccessGreen, fontWeight = FontWeight.Medium)
                       Text("Due: ₹${m.remainingDue.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ErrorRed)
                     } else {
                       Surface(
                         shape = RoundedCornerShape(4.dp),
-                        color = ErrorRedLight
+                        color = if (m.isAdvance) Color(0xFFF1F5F9) else ErrorRedLight
                       ) {
-                        Text("DUE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ErrorRed, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        Text(
+                          if (m.isAdvance) "ADVANCE" else "DUE",
+                          fontSize = 10.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = if (m.isAdvance) Slate600 else ErrorRed,
+                          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                       }
                       Text("₹${m.netPayable.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate900)
                     }

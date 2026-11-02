@@ -69,6 +69,21 @@ object FeeCalculator {
     return trimmed
   }
 
+  private val MONTH_NAMES_MAP = mapOf(
+    "jan" to "01", "january" to "01",
+    "feb" to "02", "february" to "02",
+    "mar" to "03", "march" to "03",
+    "apr" to "04", "april" to "04",
+    "may" to "05",
+    "jun" to "06", "june" to "06",
+    "jul" to "07", "july" to "07",
+    "aug" to "08", "august" to "08",
+    "sep" to "09", "sept" to "09", "september" to "09",
+    "oct" to "10", "october" to "10",
+    "nov" to "11", "november" to "11",
+    "dec" to "12", "december" to "12"
+  )
+
   fun parseIsoOrMonthToYearMonth(raw: String?): String? {
     if (raw.isNullOrBlank()) return null
     val trimmed = raw.trim()
@@ -100,7 +115,7 @@ object FeeCalculator {
       } catch (_: Exception) {}
     }
 
-    // 4. Try DD/MM/YYYY or DD-MM-YYYY
+    // 4. Try DD/MM/YYYY or DD-MM-YYYY or YYYY/MM/DD
     try {
       val slashParts = trimmed.split("/", "-")
       if (slashParts.size == 3) {
@@ -108,6 +123,25 @@ object FeeCalculator {
         val m = if (slashParts[0].length == 4) slashParts[1] else slashParts[1]
         val paddedM = m.padStart(2, '0')
         return "$y-$paddedM"
+      } else if (slashParts.size == 2) {
+        if (slashParts[0].length == 4 && slashParts[1].toIntOrNull() in 1..12) {
+          return "${slashParts[0]}-${slashParts[1].padStart(2, '0')}"
+        }
+        if (slashParts[1].length == 4 && slashParts[0].toIntOrNull() in 1..12) {
+          return "${slashParts[1]}-${slashParts[0].padStart(2, '0')}"
+        }
+      }
+    } catch (_: Exception) {}
+
+    // 5. Named month parsing (e.g. "July 2026", "Jul 2026", "July, 2026", "July")
+    try {
+      val lower = trimmed.lowercase()
+      for ((name, num) in MONTH_NAMES_MAP) {
+        if (Regex("""\b$name\b""").containsMatchIn(lower)) {
+          val yearMatch = Regex("""\b(20\d\d)\b""").find(trimmed)
+          val year = yearMatch?.value ?: "2026"
+          return "$year-$num"
+        }
       }
     } catch (_: Exception) {}
 
@@ -161,11 +195,11 @@ object FeeCalculator {
     allDiscounts: List<Discount>,
     baseMonthlyFee: Double
   ): DiscountResolution? {
-    // If student has explicit monthlyDiscount set on student record
+    var studentDirectResolution: DiscountResolution? = null
     if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
-      return DiscountResolution(
+      studentDirectResolution = DiscountResolution(
         discountId = "student-direct",
-        discountTitle = student.discountReason ?: "Student Concession",
+        discountTitle = student.discountReason?.ifBlank { "Student Concession" } ?: "Student Concession",
         discountType = "flat",
         value = student.monthlyDiscount,
         calculatedDeduction = minOf(student.monthlyDiscount, baseMonthlyFee)
@@ -204,30 +238,41 @@ object FeeCalculator {
       }
     }
 
-    if (matching.isEmpty()) return null
-
-    // Pick highest discount deduction
-    val candidate = matching.maxByOrNull { disc ->
+    val bestRule = matching.maxByOrNull { disc ->
       if (disc.type.equals("percentage", ignoreCase = true)) {
         (baseMonthlyFee * disc.value) / 100.0
       } else {
         disc.value
       }
-    } ?: return null
-
-    val deduction = if (candidate.type.equals("percentage", ignoreCase = true)) {
-      (baseMonthlyFee * candidate.value) / 100.0
-    } else {
-      candidate.value
     }
 
-    return DiscountResolution(
-      discountId = candidate.id,
-      discountTitle = candidate.title,
-      discountType = candidate.type,
-      value = candidate.value,
-      calculatedDeduction = minOf(deduction, baseMonthlyFee)
-    )
+    val ruleResolution = bestRule?.let { candidate ->
+      val deduction = if (candidate.type.equals("percentage", ignoreCase = true)) {
+        (baseMonthlyFee * candidate.value) / 100.0
+      } else {
+        candidate.value
+      }
+      DiscountResolution(
+        discountId = candidate.id,
+        discountTitle = candidate.title,
+        discountType = candidate.type,
+        value = candidate.value,
+        calculatedDeduction = minOf(deduction, baseMonthlyFee)
+      )
+    }
+
+    return when {
+      studentDirectResolution != null && ruleResolution != null -> {
+        if (studentDirectResolution.calculatedDeduction >= ruleResolution.calculatedDeduction) {
+          studentDirectResolution
+        } else {
+          ruleResolution
+        }
+      }
+      studentDirectResolution != null -> studentDirectResolution
+      ruleResolution != null -> ruleResolution
+      else -> null
+    }
   }
 
   fun calculateStudentDuesSummary(
@@ -245,19 +290,43 @@ object FeeCalculator {
       ?: course?.monthlyFee
       ?: 400.0
 
-    // Ensure months range is from admission month to targetUpToMonth (at least admission month)
-    val startMonth = if (admMonth > targetUpToMonth) targetUpToMonth else admMonth
-    val months = getMonthListBetween(startMonth, maxOf(admMonth, targetUpToMonth))
+    val billingCutoffMonth = if (targetUpToMonth.isNotBlank()) targetUpToMonth else getCurrentYearMonth()
 
-    // Approved payments for this student
+    // Filter approved payments for this student
     val approvedPayments = payments.filter {
       it.studentId == student.id && it.status.equals("approved", ignoreCase = true)
     }
 
-    // Sort approved payments chronologically
-    val sortedApprovedPayments = approvedPayments.sortedBy { it.paymentDate.ifBlank { it.createdAt ?: "" } }
+    // Collect all valid Year-Months referenced in approved payments
+    val paymentYearMonths = mutableSetOf<String>()
+    approvedPayments.forEach { p ->
+      if (p.monthsCovered.isNotEmpty()) {
+        p.monthsCovered.forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { paymentYearMonths.add(it) } }
+      }
+      if (p.month.isNotBlank()) {
+        p.month.split(",").forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { paymentYearMonths.add(it) } }
+      }
+    }
 
-    // Pre-calculate net payable for all months
+    // Determine horizon: from startMonth to endMonth (covering admission, billing cutoff, all payments, plus next 3 advance months)
+    val earliestPaid = paymentYearMonths.minOrNull()
+    val startMonth = listOfNotNull(admMonth, earliestPaid, billingCutoffMonth).minOrNull() ?: admMonth
+
+    // Calculate advance horizon (at least 3 upcoming future months beyond billing cutoff)
+    val advanceCal = Calendar.getInstance().apply {
+      timeZone = IST_TIMEZONE
+      val curSdf = SimpleDateFormat("yyyy-MM", Locale.US)
+      time = curSdf.parse(billingCutoffMonth) ?: Date()
+      add(Calendar.MONTH, 3)
+    }
+    val advanceHorizonMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(advanceCal.time)
+
+    val latestPaid = paymentYearMonths.maxOrNull()
+    val endMonth = listOfNotNull(admMonth, billingCutoffMonth, latestPaid, advanceHorizonMonth).maxOrNull() ?: billingCutoffMonth
+
+    val months = getMonthListBetween(startMonth, endMonth)
+
+    // Pre-calculate net payable and discounts for all months
     val monthNetPayableMap = mutableMapOf<String, Double>()
     val monthDiscountResMap = mutableMapOf<String, DiscountResolution?>()
     months.forEach { ym ->
@@ -274,9 +343,13 @@ object FeeCalculator {
       monthNetPayableMap[ym] = max(0.0, baseMonthlyFee - discAmt)
     }
 
-    // Accumulate payments across months
+    // Accumulate payments across months chronologically
     val monthPaidAmountMap = mutableMapOf<String, Double>()
     months.forEach { ym -> monthPaidAmountMap[ym] = 0.0 }
+    var unallocatedAdvance = 0.0
+
+    // Sort approved payments chronologically
+    val sortedApprovedPayments = approvedPayments.sortedBy { it.paymentDate.ifBlank { it.createdAt ?: "" } }
 
     sortedApprovedPayments.forEach { p ->
       val pMonths = mutableListOf<String>()
@@ -287,23 +360,81 @@ object FeeCalculator {
         p.month.split(",").forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { pMonths.add(it) } }
       }
 
-      if (pMonths.size == 1) {
-        val ym = pMonths[0]
-        monthPaidAmountMap[ym] = (monthPaidAmountMap[ym] ?: 0.0) + p.finalAmountPaid
-      } else if (pMonths.size > 1) {
+      if (pMonths.isNotEmpty()) {
         var remainingPayment = p.finalAmountPaid
+
+        // Step 1: Allocate up to net payable for explicitly selected months
         for (ym in pMonths) {
           if (remainingPayment <= 0.0) break
           val net = monthNetPayableMap[ym] ?: baseMonthlyFee
           val alreadyPaid = monthPaidAmountMap[ym] ?: 0.0
           val needed = max(0.0, net - alreadyPaid)
-          val allocate = minOf(remainingPayment, needed)
-          monthPaidAmountMap[ym] = alreadyPaid + allocate
-          remainingPayment -= allocate
+          if (needed > 0.0) {
+            val allocate = minOf(remainingPayment, needed)
+            monthPaidAmountMap[ym] = alreadyPaid + allocate
+            remainingPayment -= allocate
+          }
         }
+
+        // Step 2: If excess payment exists, roll it over to subsequent unpaid months in sequence
         if (remainingPayment > 0.0) {
-          val lastM = pMonths.last()
-          monthPaidAmountMap[lastM] = (monthPaidAmountMap[lastM] ?: 0.0) + remainingPayment
+          val lastSpecified = pMonths.last()
+          val lastIdx = months.indexOf(lastSpecified)
+          val subsequent = if (lastIdx >= 0) months.subList(lastIdx + 1, months.size) else months
+          for (nextM in subsequent) {
+            if (remainingPayment <= 0.0) break
+            val net = monthNetPayableMap[nextM] ?: baseMonthlyFee
+            val already = monthPaidAmountMap[nextM] ?: 0.0
+            val needed = max(0.0, net - already)
+            if (needed > 0.0) {
+              val alloc = minOf(remainingPayment, needed)
+              monthPaidAmountMap[nextM] = already + alloc
+              remainingPayment -= alloc
+            }
+          }
+          if (remainingPayment > 0.0) {
+            unallocatedAdvance += remainingPayment
+          }
+        }
+      } else {
+        // Payment with no specific month (e.g. Admission Advance, general deposit):
+        // Allocate to earliest unpaid months starting from admission month
+        var remaining = p.finalAmountPaid
+        for (ym in months) {
+          if (remaining <= 0.0) break
+          val net = monthNetPayableMap[ym] ?: baseMonthlyFee
+          val already = monthPaidAmountMap[ym] ?: 0.0
+          val needed = max(0.0, net - already)
+          if (needed > 0.0) {
+            val alloc = minOf(remaining, needed)
+            monthPaidAmountMap[ym] = already + alloc
+            remaining -= alloc
+          }
+        }
+        if (remaining > 0.0) {
+          unallocatedAdvance += remaining
+        }
+      }
+    }
+
+    // Reconcile with totalPaidInSheet if sheet recorded higher verified payments
+    if (student.totalPaidInSheet != null && student.totalPaidInSheet > 0.0) {
+      val sumPayments = approvedPayments.sumOf { it.finalAmountPaid }
+      if (student.totalPaidInSheet > sumPayments) {
+        var extraFromSheet = student.totalPaidInSheet - sumPayments
+        for (ym in months) {
+          if (extraFromSheet <= 0.0) break
+          val net = monthNetPayableMap[ym] ?: baseMonthlyFee
+          val already = monthPaidAmountMap[ym] ?: 0.0
+          val needed = max(0.0, net - already)
+          if (needed > 0.0) {
+            val alloc = minOf(extraFromSheet, needed)
+            monthPaidAmountMap[ym] = already + alloc
+            extraFromSheet -= alloc
+          }
+        }
+        if (extraFromSheet > 0.0) {
+          unallocatedAdvance += extraFromSheet
         }
       }
     }
@@ -316,6 +447,7 @@ object FeeCalculator {
       val isFullyPaid = paidSoFar >= (net - 0.01)
       val remaining = if (isFullyPaid) 0.0 else max(0.0, net - paidSoFar)
       val isPartPaid = paidSoFar > 0.0 && !isFullyPaid
+      val isFuture = ym > billingCutoffMonth
 
       MonthFeeDetail(
         yearMonth = ym,
@@ -327,18 +459,35 @@ object FeeCalculator {
         amountPaid = paidSoFar,
         remainingDue = remaining,
         isPaid = isFullyPaid,
-        isPartiallyPaid = isPartPaid
+        isPartiallyPaid = isPartPaid,
+        isAdvance = isFuture
       )
     }
 
-    val pending = monthDetails.filter { !it.isPaid }
-    val paid = monthDetails.filter { it.isPaid }
+    // Billed months: months up to billing cutoff month
+    val billedMonths = monthDetails.filter { !it.isAdvance }
+    // Advance months: future months beyond billing cutoff
+    val advanceMonths = monthDetails.filter { it.isAdvance }
 
-    val totalBase = monthDetails.sumOf { it.baseFee }
-    val totalDisc = monthDetails.sumOf { it.discountAmount }
-    val totalNet = monthDetails.sumOf { it.netPayable }
-    val totalPaidAmt = monthDetails.sumOf { it.amountPaid }
-    val totalDue = pending.sumOf { it.remainingDue }
+    val paidMonthsList = monthDetails.filter { it.isPaid }
+    val advancePaidMonths = advanceMonths.filter { it.isPaid }
+
+    // Pending months are unpaid/part-paid months in the billed cycle
+    val pendingMonthsList = billedMonths.filter { !it.isPaid }
+
+    val totalBase = billedMonths.sumOf { it.baseFee }
+    val totalDisc = billedMonths.sumOf { it.discountAmount }
+    val totalNet = billedMonths.sumOf { it.netPayable }
+
+    val actualTotalPaid = maxOf(
+      approvedPayments.sumOf { it.finalAmountPaid },
+      monthDetails.sumOf { it.amountPaid } + unallocatedAdvance
+    )
+
+    val rawBilledDue = pendingMonthsList.sumOf { it.remainingDue }
+    val totalDue = maxOf(0.0, rawBilledDue - unallocatedAdvance)
+    val excessUnallocated = maxOf(0.0, unallocatedAdvance - rawBilledDue)
+    val netAdvanceBalance = advanceMonths.sumOf { it.amountPaid } + excessUnallocated
 
     return FeeDuesSummary(
       studentId = student.id,
@@ -350,11 +499,13 @@ object FeeCalculator {
       totalBaseFee = totalBase,
       totalDiscount = totalDisc,
       totalNetPayable = totalNet,
-      totalPaid = totalPaidAmt,
+      totalPaid = actualTotalPaid,
       totalOutstandingDue = totalDue,
-      pendingMonths = pending,
-      paidMonths = paid,
-      allMonths = monthDetails
+      pendingMonths = pendingMonthsList,
+      paidMonths = paidMonthsList,
+      allMonths = monthDetails,
+      advanceBalance = netAdvanceBalance,
+      advanceMonthsCount = advancePaidMonths.size
     )
   }
 
