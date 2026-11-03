@@ -335,6 +335,15 @@ class PathsalaRepository private constructor(private val context: Context) {
     _payments.value = updatedPayments
     localStore.savePayments(updatedPayments)
 
+    val currentApprovedTotal = updatedPayments
+      .filter { it.studentId == student.id && it.status.equals("approved", ignoreCase = true) }
+      .sumOf { it.finalAmountPaid }
+    val updatedStudents = _students.value.map { st ->
+      if (st.id == student.id) st.copy(totalPaidInSheet = currentApprovedTotal) else st
+    }
+    _students.value = updatedStudents
+    localStore.saveStudents(updatedStudents)
+
     // Push to Google Sheet in background
     scope.launch {
       sheetService.pushNewPayment(payment)
@@ -465,6 +474,15 @@ class PathsalaRepository private constructor(private val context: Context) {
     _payments.value = updatedList
     localStore.savePayments(updatedList)
 
+    val currentApprovedTotal = updatedList
+      .filter { it.studentId == target.studentId && it.status.equals("approved", ignoreCase = true) }
+      .sumOf { it.finalAmountPaid }
+    val updatedStudents = _students.value.map { st ->
+      if (st.id == target.studentId) st.copy(totalPaidInSheet = currentApprovedTotal) else st
+    }
+    _students.value = updatedStudents
+    localStore.saveStudents(updatedStudents)
+
     scope.launch {
       try {
         sheetService.updatePaymentApproval(paymentId, "approved", approverName, null)
@@ -489,11 +507,21 @@ class PathsalaRepository private constructor(private val context: Context) {
     _payments.value = updatedList
     localStore.savePayments(updatedList)
 
+    val currentApprovedTotal = updatedList
+      .filter { it.studentId == target.studentId && it.status.equals("approved", ignoreCase = true) }
+      .sumOf { it.finalAmountPaid }
+    val updatedStudents = _students.value.map { st ->
+      if (st.id == target.studentId) st.copy(totalPaidInSheet = currentApprovedTotal) else st
+    }
+    _students.value = updatedStudents
+    localStore.saveStudents(updatedStudents)
+
     scope.launch {
       try {
         sheetService.updatePaymentApproval(paymentId, "rejected", rejectedBy, reason)
       } catch (_: Exception) {}
       sheetService.syncFeeTransactions(updatedList)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
     return Result.success(true)
   }
@@ -976,11 +1004,26 @@ class PathsalaRepository private constructor(private val context: Context) {
 
   // --- PAYMENTS CRUD ---
   fun deletePayment(paymentId: String) {
+    val target = _payments.value.firstOrNull { it.id == paymentId }
     val updated = _payments.value.filterNot { it.id == paymentId }
     _payments.value = updated
     localStore.savePayments(updated)
+
+    if (target != null) {
+      val stId = target.studentId
+      val remainingApprovedSum = updated
+        .filter { it.studentId == stId && it.status.equals("approved", ignoreCase = true) }
+        .sumOf { it.finalAmountPaid }
+      val updatedStudents = _students.value.map { st ->
+        if (st.id == stId) st.copy(totalPaidInSheet = remainingApprovedSum) else st
+      }
+      _students.value = updatedStudents
+      localStore.saveStudents(updatedStudents)
+    }
+
     scope.launch {
       sheetService.syncFeeTransactions(_payments.value)
+      sheetService.syncStudents(_students.value, _courses.value)
     }
   }
 

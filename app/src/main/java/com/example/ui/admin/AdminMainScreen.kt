@@ -920,6 +920,7 @@ fun AdminFeeDeskTab(
   var remarks by remember { mutableStateOf("") }
   var messageText by remember { mutableStateOf<String?>(null) }
   var showSendReminderDialog by remember { mutableStateOf(false) }
+  var paymentToDelete by remember { mutableStateOf<FeePayment?>(null) }
   var feeSubTab by remember { mutableIntStateOf(0) } // 0: Collection Desk, 1: Ledger & Dues
 
   LaunchedEffect(students) {
@@ -965,11 +966,12 @@ fun AdminFeeDeskTab(
     }
   }
 
-  val selectedCourse = courses.firstOrNull { it.id == selectedStudent?.courseId }
-  val selectedBatch = batches.firstOrNull { it.id == selectedStudent?.batchId }
+  val currentStudent = students.firstOrNull { it.id == selectedStudent?.id } ?: selectedStudent ?: students.firstOrNull()
+  val selectedCourse = courses.firstOrNull { it.id == currentStudent?.courseId }
+  val selectedBatch = batches.firstOrNull { it.id == currentStudent?.batchId }
 
-  val studentDues = remember(selectedStudent, courses, batches, discounts, payments) {
-    selectedStudent?.let {
+  val studentDues = remember(currentStudent, courses, batches, discounts, payments) {
+    currentStudent?.let {
       FeeCalculator.calculateStudentDuesSummary(
         student = it,
         course = selectedCourse,
@@ -980,7 +982,7 @@ fun AdminFeeDeskTab(
     }
   }
 
-  val selectedMonths = remember(selectedStudent) { mutableStateListOf<String>() }
+  val selectedMonths = remember(currentStudent?.id) { mutableStateListOf<String>() }
 
   LaunchedEffect(studentDues) {
     selectedMonths.clear()
@@ -1266,7 +1268,7 @@ fun AdminFeeDeskTab(
     }
 
     // Multi-month Fee Box
-    if (selectedStudent != null && studentDues != null) {
+    if (currentStudent != null && studentDues != null) {
       item {
         Card(
           shape = RoundedCornerShape(16.dp),
@@ -1282,20 +1284,20 @@ fun AdminFeeDeskTab(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Column(modifier = Modifier.weight(1f)) {
-                Text(text = selectedStudent!!.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
-                Text(text = "Roll No: ${selectedStudent!!.rollNo} • Mobile: ${selectedStudent!!.mobile}", fontSize = 12.sp, color = Slate700)
+                Text(text = currentStudent.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Slate900)
+                Text(text = "Roll No: ${currentStudent.rollNo} • Mobile: ${currentStudent.mobile}", fontSize = 12.sp, color = Slate700)
                 Text(text = "Course: ${studentDues.courseTitle} • Batch: ${studentDues.batchName}", fontSize = 12.sp, color = Slate600)
                 Text(text = "Monthly Rate: ₹${studentDues.standardMonthlyFee.toInt()} • Adm: ${studentDues.admissionMonth}", fontSize = 12.sp, color = BrandPrimary, fontWeight = FontWeight.SemiBold)
               }
               Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = if (selectedStudent!!.status.equals("active", true)) Color(0xFFDCFCE7) else Slate100
+                color = if (currentStudent.status.equals("active", true)) Color(0xFFDCFCE7) else Slate100
               ) {
                 Text(
-                  text = selectedStudent!!.status.uppercase(),
+                  text = currentStudent.status.uppercase(),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = if (selectedStudent!!.status.equals("active", true)) SuccessGreen else Slate600,
+                  color = if (currentStudent.status.equals("active", true)) SuccessGreen else Slate600,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
@@ -1641,7 +1643,7 @@ fun AdminFeeDeskTab(
                   return@Button
                 }
                 onCollectFee(
-                  selectedStudent!!.id,
+                  currentStudent.id,
                   selectedMonths.toList(),
                   amountToCollect,
                   paymentMode,
@@ -1753,19 +1755,28 @@ fun AdminFeeDeskTab(
               )
             }
           }
-          Column(horizontalAlignment = Alignment.End) {
-            Text(
-              text = "₹${p.finalAmountPaid.toInt()}",
-              fontSize = 16.sp,
-              fontWeight = FontWeight.Bold,
-              color = if (isRejected) ErrorRed else SuccessGreen
-            )
-            Text(
-              text = if (isRejected) "View Slip (Rejected)" else "View Slip",
-              fontSize = 11.sp,
-              color = if (isRejected) ErrorRed else BrandPrimary,
-              fontWeight = FontWeight.SemiBold
-            )
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(horizontalAlignment = Alignment.End) {
+              Text(
+                text = "₹${p.finalAmountPaid.toInt()}",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isRejected) ErrorRed else SuccessGreen
+              )
+              Text(
+                text = if (isRejected) "View Slip (Rejected)" else "View Slip",
+                fontSize = 11.sp,
+                color = if (isRejected) ErrorRed else BrandPrimary,
+                fontWeight = FontWeight.SemiBold
+              )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            IconButton(
+              onClick = { paymentToDelete = p },
+              modifier = Modifier.size(32.dp)
+            ) {
+              Icon(Icons.Default.Delete, contentDescription = "Delete Transaction", tint = ErrorRed, modifier = Modifier.size(16.dp))
+            }
           }
         }
       }
@@ -1774,21 +1785,49 @@ fun AdminFeeDeskTab(
 }
 }
 
-  if (showSendReminderDialog && selectedStudent != null && studentDues != null) {
+  if (showSendReminderDialog && currentStudent != null && studentDues != null) {
     SendFeeReminderDialog(
-      student = selectedStudent!!,
+      student = currentStudent,
       dueAmount = studentDues.totalOutstandingDue,
       pendingMonths = studentDues.pendingMonths.joinToString { it.monthLabel },
       onDismiss = { showSendReminderDialog = false },
       onConfirmSend = { customMsg ->
         onSendReminder(
-          selectedStudent!!,
+          currentStudent,
           studentDues.totalOutstandingDue,
           studentDues.pendingMonths.joinToString { it.monthLabel },
           customMsg
         )
-        Toast.makeText(context, "Fee reminder notification sent to ${selectedStudent!!.name}!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Fee reminder notification sent to ${currentStudent.name}!", Toast.LENGTH_SHORT).show()
         showSendReminderDialog = false
+      }
+    )
+  }
+
+  if (paymentToDelete != null) {
+    AlertDialog(
+      onDismissRequest = { paymentToDelete = null },
+      title = { Text("Delete Fee Transaction", fontWeight = FontWeight.Bold) },
+      text = {
+        Text("Are you sure you want to delete receipt ${paymentToDelete!!.receiptNo} (₹${paymentToDelete!!.finalAmountPaid.toInt()}) for ${paymentToDelete!!.studentName}? This will immediately update the collection desk and re-open fee dues for the corresponding month(s).")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val toDelete = paymentToDelete!!
+            paymentToDelete = null
+            onDeletePayment(toDelete.id)
+            Toast.makeText(context, "Transaction ${toDelete.receiptNo} deleted. Fee dues updated.", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+        ) {
+          Text("Delete", color = Color.White)
+        }
+      },
+      dismissButton = {
+        OutlinedButton(onClick = { paymentToDelete = null }) {
+          Text("Cancel")
+        }
       }
     )
   }

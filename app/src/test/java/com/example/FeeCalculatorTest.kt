@@ -499,4 +499,63 @@ class FeeCalculatorTest {
     assertEquals(150.0, discResolved2?.calculatedDeduction ?: 0.0, 0.01)
     assertEquals("Mega Discount", discResolved2?.discountTitle)
   }
+
+  @Test
+  fun testDeletedPaymentProperlyReopensMonthDue() {
+    val student = Student(
+      id = "stu-del-1",
+      rollNo = "PP-DEL-001",
+      name = "Vikram Roy",
+      mobile = "9876543211",
+      aadhaarNo = "555566667777",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z",
+      totalPaidInSheet = 400.0 // Simulates old sheet state before transaction deletion
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+
+    val payment = FeePayment(
+      id = "pay-to-delete",
+      receiptNo = "REC/2026/07-DEL",
+      studentId = student.id,
+      studentName = student.name,
+      month = "2026-07",
+      monthsCovered = listOf("2026-07"),
+      finalAmountPaid = 400.0,
+      status = "approved"
+    )
+
+    // 1. When payment exists: July should be fully paid
+    val summaryBeforeDelete = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = listOf(payment),
+      targetUpToMonth = "2026-07"
+    )
+    val julyBefore = summaryBeforeDelete.allMonths.first { it.yearMonth == "2026-07" }
+    assertTrue(julyBefore.isPaid)
+    assertEquals(400.0, julyBefore.amountPaid, 0.01)
+    assertEquals(0.0, julyBefore.remainingDue, 0.01)
+    assertEquals(0.0, summaryBeforeDelete.totalOutstandingDue, 0.01)
+
+    // 2. When payment is deleted (empty payments list):
+    // July must immediately reopen as DUE with 400.0 remaining, NOT hold old paid data
+    val summaryAfterDelete = FeeCalculator.calculateStudentDuesSummary(
+      student = student.copy(totalPaidInSheet = 0.0), // Updated student record after deletion
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = emptyList(),
+      targetUpToMonth = "2026-07"
+    )
+    val julyAfter = summaryAfterDelete.allMonths.first { it.yearMonth == "2026-07" }
+    assertFalse(julyAfter.isPaid)
+    assertEquals(0.0, julyAfter.amountPaid, 0.01)
+    assertEquals(400.0, julyAfter.remainingDue, 0.01)
+    assertEquals(400.0, summaryAfterDelete.totalOutstandingDue, 0.01)
+    assertEquals(1, summaryAfterDelete.pendingMonths.size)
+  }
 }

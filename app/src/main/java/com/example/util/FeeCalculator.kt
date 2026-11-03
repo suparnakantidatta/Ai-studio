@@ -417,25 +417,22 @@ object FeeCalculator {
       }
     }
 
-    // Reconcile with totalPaidInSheet if sheet recorded higher verified payments
-    if (student.totalPaidInSheet != null && student.totalPaidInSheet > 0.0) {
-      val sumPayments = approvedPayments.sumOf { it.finalAmountPaid }
-      if (student.totalPaidInSheet > sumPayments) {
-        var extraFromSheet = student.totalPaidInSheet - sumPayments
-        for (ym in months) {
-          if (extraFromSheet <= 0.0) break
-          val net = monthNetPayableMap[ym] ?: baseMonthlyFee
-          val already = monthPaidAmountMap[ym] ?: 0.0
-          val needed = max(0.0, net - already)
-          if (needed > 0.0) {
-            val alloc = minOf(extraFromSheet, needed)
-            monthPaidAmountMap[ym] = already + alloc
-            extraFromSheet -= alloc
-          }
+    // Fallback to totalPaidInSheet ONLY if there are no itemized payment records for this student
+    if (approvedPayments.isEmpty() && student.totalPaidInSheet != null && student.totalPaidInSheet > 0.0) {
+      var extraFromSheet = student.totalPaidInSheet
+      for (ym in months) {
+        if (extraFromSheet <= 0.0) break
+        val net = monthNetPayableMap[ym] ?: baseMonthlyFee
+        val already = monthPaidAmountMap[ym] ?: 0.0
+        val needed = max(0.0, net - already)
+        if (needed > 0.0) {
+          val alloc = minOf(extraFromSheet, needed)
+          monthPaidAmountMap[ym] = already + alloc
+          extraFromSheet -= alloc
         }
-        if (extraFromSheet > 0.0) {
-          unallocatedAdvance += extraFromSheet
-        }
+      }
+      if (extraFromSheet > 0.0) {
+        unallocatedAdvance += extraFromSheet
       }
     }
 

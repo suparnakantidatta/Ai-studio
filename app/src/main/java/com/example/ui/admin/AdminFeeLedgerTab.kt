@@ -42,6 +42,7 @@ fun AdminFeeLedgerTab(
   val context = LocalContext.current
   var selectedSubTab by remember { mutableIntStateOf(0) } // 0: Receipts Ledger, 1: Outstanding Dues
   var duesFilterOnlyWithDues by remember { mutableStateOf(false) }
+  var deletingPayment by remember { mutableStateOf<FeePayment?>(null) }
 
   // Compute stats across all students
   val studentSummaries = remember(students, courses, batches, discounts, payments) {
@@ -353,7 +354,7 @@ fun AdminFeeLedgerTab(
                     Spacer(modifier = Modifier.width(6.dp))
 
                     IconButton(
-                      onClick = { onDeletePayment(p.id) },
+                      onClick = { deletingPayment = p },
                       modifier = Modifier.size(32.dp)
                     ) {
                       Icon(Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed, modifier = Modifier.size(16.dp))
@@ -756,5 +757,33 @@ fun AdminFeeLedgerTab(
         }
       }
     }
+  }
+
+  if (deletingPayment != null) {
+    AlertDialog(
+      onDismissRequest = { deletingPayment = null },
+      title = { Text("Delete Fee Transaction", fontWeight = FontWeight.Bold) },
+      text = {
+        Text("Are you sure you want to delete receipt ${deletingPayment!!.receiptNo} (₹${deletingPayment!!.finalAmountPaid.toInt()}) for ${deletingPayment!!.studentName}? This will immediately update the collection desk and re-open fee dues for the corresponding month(s).")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val toDelete = deletingPayment!!
+            deletingPayment = null
+            onDeletePayment(toDelete.id)
+            Toast.makeText(context, "Transaction ${toDelete.receiptNo} deleted. Fee dues updated.", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+        ) {
+          Text("Delete", color = Color.White)
+        }
+      },
+      dismissButton = {
+        OutlinedButton(onClick = { deletingPayment = null }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 }
