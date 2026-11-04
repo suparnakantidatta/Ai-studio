@@ -308,9 +308,9 @@ object FeeCalculator {
       }
     }
 
-    // Determine horizon: from startMonth to endMonth (covering admission, billing cutoff, all payments, plus next 3 advance months)
+    // Start horizon from the date of admission (or earliest payment if recorded earlier)
     val earliestPaid = paymentYearMonths.minOrNull()
-    val startMonth = listOfNotNull(admMonth, earliestPaid, billingCutoffMonth).minOrNull() ?: admMonth
+    val startMonth = listOfNotNull(admMonth, earliestPaid).minOrNull() ?: admMonth
 
     // Calculate advance horizon (at least 3 upcoming future months beyond billing cutoff)
     val advanceCal = Calendar.getInstance().apply {
@@ -343,98 +343,26 @@ object FeeCalculator {
       monthNetPayableMap[ym] = max(0.0, baseMonthlyFee - discAmt)
     }
 
-    // Accumulate payments across months chronologically
+    // Total fees collection: sum of approved itemized payments, or sheet total if no itemized payments
+    val totalFeesCollection = if (approvedPayments.isNotEmpty()) {
+      approvedPayments.sumOf { it.finalAmountPaid }
+    } else {
+      student.totalPaidInSheet ?: 0.0
+    }
+
+    // Sequentially adjust from the first month (date of admission) using total fees collection
+    var remainingCollection = totalFeesCollection
     val monthPaidAmountMap = mutableMapOf<String, Double>()
     months.forEach { ym -> monthPaidAmountMap[ym] = 0.0 }
-    var unallocatedAdvance = 0.0
 
-    // Sort approved payments chronologically
-    val sortedApprovedPayments = approvedPayments.sortedBy { it.paymentDate.ifBlank { it.createdAt ?: "" } }
-
-    sortedApprovedPayments.forEach { p ->
-      val pMonths = mutableListOf<String>()
-      if (p.monthsCovered.isNotEmpty()) {
-        p.monthsCovered.forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { pMonths.add(it) } }
-      }
-      if (pMonths.isEmpty() && p.month.isNotBlank()) {
-        p.month.split(",").forEach { m -> parseIsoOrMonthToYearMonth(m)?.let { pMonths.add(it) } }
-      }
-
-      if (pMonths.isNotEmpty()) {
-        var remainingPayment = p.finalAmountPaid
-
-        // Step 1: Allocate up to net payable for explicitly selected months
-        for (ym in pMonths) {
-          if (remainingPayment <= 0.0) break
-          val net = monthNetPayableMap[ym] ?: baseMonthlyFee
-          val alreadyPaid = monthPaidAmountMap[ym] ?: 0.0
-          val needed = max(0.0, net - alreadyPaid)
-          if (needed > 0.0) {
-            val allocate = minOf(remainingPayment, needed)
-            monthPaidAmountMap[ym] = alreadyPaid + allocate
-            remainingPayment -= allocate
-          }
-        }
-
-        // Step 2: If excess payment exists, roll it over to subsequent unpaid months in sequence
-        if (remainingPayment > 0.0) {
-          val lastSpecified = pMonths.last()
-          val lastIdx = months.indexOf(lastSpecified)
-          val subsequent = if (lastIdx >= 0) months.subList(lastIdx + 1, months.size) else months
-          for (nextM in subsequent) {
-            if (remainingPayment <= 0.0) break
-            val net = monthNetPayableMap[nextM] ?: baseMonthlyFee
-            val already = monthPaidAmountMap[nextM] ?: 0.0
-            val needed = max(0.0, net - already)
-            if (needed > 0.0) {
-              val alloc = minOf(remainingPayment, needed)
-              monthPaidAmountMap[nextM] = already + alloc
-              remainingPayment -= alloc
-            }
-          }
-          if (remainingPayment > 0.0) {
-            unallocatedAdvance += remainingPayment
-          }
-        }
-      } else {
-        // Payment with no specific month (e.g. Admission Advance, general deposit):
-        // Allocate to earliest unpaid months starting from admission month
-        var remaining = p.finalAmountPaid
-        for (ym in months) {
-          if (remaining <= 0.0) break
-          val net = monthNetPayableMap[ym] ?: baseMonthlyFee
-          val already = monthPaidAmountMap[ym] ?: 0.0
-          val needed = max(0.0, net - already)
-          if (needed > 0.0) {
-            val alloc = minOf(remaining, needed)
-            monthPaidAmountMap[ym] = already + alloc
-            remaining -= alloc
-          }
-        }
-        if (remaining > 0.0) {
-          unallocatedAdvance += remaining
-        }
-      }
+    for (ym in months) {
+      if (remainingCollection <= 0.0) break
+      val net = monthNetPayableMap[ym] ?: baseMonthlyFee
+      val alloc = minOf(remainingCollection, net)
+      monthPaidAmountMap[ym] = alloc
+      remainingCollection -= alloc
     }
-
-    // Fallback to totalPaidInSheet ONLY if there are no itemized payment records for this student
-    if (approvedPayments.isEmpty() && student.totalPaidInSheet != null && student.totalPaidInSheet > 0.0) {
-      var extraFromSheet = student.totalPaidInSheet
-      for (ym in months) {
-        if (extraFromSheet <= 0.0) break
-        val net = monthNetPayableMap[ym] ?: baseMonthlyFee
-        val already = monthPaidAmountMap[ym] ?: 0.0
-        val needed = max(0.0, net - already)
-        if (needed > 0.0) {
-          val alloc = minOf(extraFromSheet, needed)
-          monthPaidAmountMap[ym] = already + alloc
-          extraFromSheet -= alloc
-        }
-      }
-      if (extraFromSheet > 0.0) {
-        unallocatedAdvance += extraFromSheet
-      }
-    }
+    val unallocatedAdvance = maxOf(0.0, remainingCollection)
 
     val monthDetails = months.map { ym ->
       val discountRes = monthDiscountResMap[ym]

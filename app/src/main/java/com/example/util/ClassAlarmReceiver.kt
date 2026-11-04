@@ -11,5 +11,6 @@ class ClassAlarmReceiver : BroadcastReceiver() {
     val time = intent.getStringExtra("time") ?: ""
 
     NotificationHelper.sendClassAlarmSystemNotification(context, title, subject, time)
+    InAppAlarmScheduler.scheduleNextSyncAlarm(context)
   }
 }

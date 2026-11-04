@@ -176,6 +176,9 @@ object NotificationHelper {
         "Class scheduled on $scheduledDate at $startTime ($subject - ${batchName ?: "Regular"}). Tap to open."
       }
 
+      val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
       val builder = NotificationCompat.Builder(context, CHANNEL_CLASS_ALERTS)
         .setSmallIcon(if (isPostponed) android.R.drawable.stat_notify_error else android.R.drawable.ic_dialog_info)
         .setContentTitle(notifTitle)
@@ -185,8 +188,10 @@ object NotificationHelper {
         .setColorized(true)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         .setShowWhen(true)
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .setCategory(NotificationCompat.CATEGORY_EVENT)
+        .setPriority(NotificationCompat.PRIORITY_MAX)
+        .setCategory(NotificationCompat.CATEGORY_ALARM)
+        .setSound(alarmSound)
+        .setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
         .setOngoing(false)
         .setAutoCancel(true)
         .setContentIntent(pendingIntent)

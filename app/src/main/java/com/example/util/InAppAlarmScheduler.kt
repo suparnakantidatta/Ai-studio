@@ -32,15 +32,9 @@ object InAppAlarmScheduler {
         return
       }
 
-      // Ring ONLY 30 minutes before class start
-      val targetAlarmMillis = classStartTimeMillis - 30 * 60 * 1000L
-
-      if (targetAlarmMillis <= now) {
-        // Advance 30-min window has already passed; do not trigger immediately
-        return
-      }
-
-      val triggerMillis = targetAlarmMillis
+      // Ring 30 minutes before class start, or at class start time if class is nearer
+      val advanceAlarmMillis = classStartTimeMillis - 30 * 60 * 1000L
+      val triggerMillis = if (advanceAlarmMillis > now) advanceAlarmMillis else classStartTimeMillis
 
       val intent = Intent(context, ClassAlarmReceiver::class.java).apply {
         putExtra("title", session.title)
@@ -57,7 +51,13 @@ object InAppAlarmScheduler {
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
       )
 
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (alarmManager.canScheduleExactAlarms()) {
+          alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
+        } else {
+          alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
+        }
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
       } else {
         alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)

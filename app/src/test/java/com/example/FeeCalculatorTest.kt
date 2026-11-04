@@ -558,4 +558,106 @@ class FeeCalculatorTest {
     assertEquals(400.0, summaryAfterDelete.totalOutstandingDue, 0.01)
     assertEquals(1, summaryAfterDelete.pendingMonths.size)
   }
+
+  @Test
+  fun testFeeAdjustmentFromAdmissionDateSequentiallyUsingTotalCollection() {
+    val student = Student(
+      id = "stu-fifo-1",
+      rollNo = "PP-FIFO-01",
+      name = "Rahul Bannerjee",
+      mobile = "9830012345",
+      aadhaarNo = "1234 5678 9012",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z" // Converted to IST: 2026-07
+    )
+
+    val course = Course(
+      id = "course-1",
+      title = "Mathematics Core",
+      monthlyFee = 500.0
+    )
+
+    // Total fees collection of ₹750 across two payments (e.g. ₹500 and ₹250)
+    val payments = listOf(
+      FeePayment(
+        id = "pay-f1",
+        receiptNo = "REC/2026/07-F1",
+        studentId = student.id,
+        studentName = student.name,
+        month = "2026-07",
+        monthsCovered = listOf("2026-07"),
+        finalAmountPaid = 500.0,
+        status = "approved"
+      ),
+      FeePayment(
+        id = "pay-f2",
+        receiptNo = "REC/2026/08-F2",
+        studentId = student.id,
+        studentName = student.name,
+        month = "2026-08",
+        monthsCovered = listOf("2026-08"),
+        finalAmountPaid = 250.0,
+        status = "approved"
+      )
+    )
+
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = null,
+      discounts = emptyList(),
+      payments = payments,
+      targetUpToMonth = "2026-08"
+    )
+
+    // First month must be 2026-07 (from date of admission)
+    assertEquals("2026-07", summary.allMonths.first().yearMonth)
+
+    val month1 = summary.allMonths.first { it.yearMonth == "2026-07" }
+    assertEquals(500.0, month1.amountPaid, 0.01)
+    assertEquals(0.0, month1.remainingDue, 0.01)
+    assertTrue("First month should be fully PAID", month1.isPaid)
+    assertFalse("First month should not be partially paid", month1.isPartiallyPaid)
+
+    val month2 = summary.allMonths.first { it.yearMonth == "2026-08" }
+    assertEquals(250.0, month2.amountPaid, 0.01)
+    assertEquals(250.0, month2.remainingDue, 0.01)
+    assertFalse("Second month should not be fully paid", month2.isPaid)
+    assertTrue("Second month should be PARTIALLY PAID", month2.isPartiallyPaid)
+
+    assertEquals(250.0, summary.totalOutstandingDue, 0.01)
+    assertEquals(750.0, summary.totalPaid, 0.01)
+  }
+
+  @Test
+  fun testAadhaarLastFourPasswordVerificationLogic() {
+    val studentWithPlainAadhaar = Student(
+      id = "stu-auth-1",
+      rollNo = "PP-01",
+      name = "Amit Das",
+      mobile = "9876543210",
+      aadhaarNo = "943892479593",
+      courseId = "c-1",
+      batchId = "b-1"
+    )
+    val digits1 = studentWithPlainAadhaar.aadhaarNo.filter { it.isDigit() }
+    val pass1 = digits1.takeLast(4)
+    assertEquals("9593", pass1)
+
+    // Formatted Aadhaar with spaces
+    val studentWithFormattedAadhaar = Student(
+      id = "stu-auth-2",
+      rollNo = "PP-02",
+      name = "Sujata Sen",
+      mobile = "9876543211",
+      aadhaarNo = "9438 9247 1234",
+      courseId = "c-1",
+      batchId = "b-1"
+    )
+    val digits2 = studentWithFormattedAadhaar.aadhaarNo.filter { it.isDigit() }
+    val pass2 = digits2.takeLast(4)
+    assertEquals("1234", pass2)
+  }
 }
+

@@ -543,8 +543,13 @@ fun LoginScreen(
               Button(
                 onClick = {
                   val trimmedId = studentIdentifier.trim()
+                  val trimmedSecret = studentSecret.trim()
                   if (trimmedId.isBlank()) {
                     studentError = "Please enter your Student ID, Roll No, or Mobile"
+                    return@Button
+                  }
+                  if (trimmedSecret.isBlank()) {
+                    studentError = "Please enter your password (last 4 digits of Aadhaar)"
                     return@Button
                   }
 
@@ -555,7 +560,7 @@ fun LoginScreen(
                     return@Button
                   }
 
-                  val success = repository.loginStudent(trimmedId, studentSecret)
+                  val success = repository.loginStudent(trimmedId, trimmedSecret)
                   if (success) {
                     val loggedIn = repository.currentStudent.value
                     if (loggedIn != null) {
@@ -566,7 +571,7 @@ fun LoginScreen(
                     }
                     onStudentLoginSuccess()
                   } else {
-                    studentError = "Student record not found or password incorrect. If you recently applied, please wait for center approval."
+                    studentError = "Invalid credentials. Password must be the last 4 digits of your Aadhaar number."
                   }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = if (isDarkMode) BrandPrimary else Color(0xFF0F172A)),

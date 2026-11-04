@@ -165,23 +165,32 @@ class PathsalaRepository private constructor(private val context: Context) {
     val cleanId = identifier.trim()
     val cleanSecret = passOrSecret.trim()
 
+    if (cleanId.isEmpty() || cleanSecret.isEmpty()) {
+      return false
+    }
+
+    val cleanDigitsId = cleanId.filter { it.isDigit() }
+
     val matched = _students.value.firstOrNull { st ->
       st.id.equals(cleanId, ignoreCase = true) ||
       st.rollNo.equals(cleanId, ignoreCase = true) ||
-      st.mobile.equals(cleanId, ignoreCase = true) ||
-      st.aadhaarNo.equals(cleanId, ignoreCase = true) ||
+      st.mobile.trim().equals(cleanId, ignoreCase = true) ||
+      (cleanDigitsId.isNotEmpty() && st.aadhaarNo.filter { it.isDigit() }.equals(cleanDigitsId)) ||
       st.name.equals(cleanId, ignoreCase = true)
     }
 
     if (matched != null) {
-      if (cleanSecret.isNotEmpty()) {
-        val matchesSecret = cleanSecret.equals(matched.rollNo, ignoreCase = true) ||
-          cleanSecret.equals(matched.mobile.takeLast(4), ignoreCase = true) ||
-          cleanSecret.equals(matched.aadhaarNo.takeLast(4), ignoreCase = true) ||
-          cleanSecret == "1234" ||
-          cleanSecret == "student123"
-        if (!matchesSecret) return false
+      val aadhaarDigits = matched.aadhaarNo.filter { it.isDigit() }
+      val expectedPassword = if (aadhaarDigits.length >= 4) {
+        aadhaarDigits.takeLast(4)
+      } else {
+        matched.aadhaarNo.trim().takeLast(4)
       }
+
+      if (expectedPassword.isEmpty() || !cleanSecret.equals(expectedPassword, ignoreCase = true)) {
+        return false
+      }
+
       _currentStudent.value = matched
       localStore.saveLoggedInStudent(matched)
       return true
@@ -911,6 +920,16 @@ class PathsalaRepository private constructor(private val context: Context) {
         com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, updatedSession, showToast = false)
       }
 
+      // Alert student of postponement or restoration
+      _currentStudent.value?.let { st ->
+        com.example.util.NotificationHelper.syncStudentClassNotification(
+          context = context,
+          student = st,
+          liveClasses = _liveClasses.value,
+          batches = _batches.value
+        )
+      }
+
       scope.launch {
         sheetService.postponeClass(sessionId, isPostponed)
         sheetService.syncLiveClasses(_liveClasses.value)
@@ -942,6 +961,16 @@ class PathsalaRepository private constructor(private val context: Context) {
 
       // Set alarm 30 minutes before newly scheduled class time
       com.example.util.InAppAlarmScheduler.scheduleClassAlarm(context, updatedSession, showToast = false)
+
+      // Alert student of rescheduled class
+      _currentStudent.value?.let { st ->
+        com.example.util.NotificationHelper.syncStudentClassNotification(
+          context = context,
+          student = st,
+          liveClasses = _liveClasses.value,
+          batches = _batches.value
+        )
+      }
 
       scope.launch {
         sheetService.syncLiveClasses(updated)
