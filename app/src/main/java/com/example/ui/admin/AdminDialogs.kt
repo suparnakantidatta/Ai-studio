@@ -366,8 +366,14 @@ fun ManageDiscountsDialog(
               ) {
                 Column(modifier = Modifier.weight(1f)) {
                   Text(text = disc.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Slate900)
+                  val targetDesc = when (disc.scope.lowercase()) {
+                    "batch" -> batches.firstOrNull { it.id == disc.batchId }?.name?.let { " • Batch: $it" } ?: ""
+                    "student" -> students.firstOrNull { it.id == disc.studentId || it.rollNo == disc.studentId }?.name?.let { " • Student: $it" } ?: (disc.studentId?.let { " • Student: $it" } ?: "")
+                    "course" -> courses.firstOrNull { it.id == disc.courseId }?.title?.let { " • Course: $it" } ?: ""
+                    else -> ""
+                  }
                   Text(
-                    text = "Deduction: ${if (disc.type == "flat") "₹${disc.value.toInt()}" else "${disc.value.toInt()}%"} • Scope: ${disc.scope.uppercase()}",
+                    text = "Deduction: ${if (disc.type == "flat") "₹${disc.value.toInt()}" else "${disc.value.toInt()}%"} • Scope: ${disc.scope.uppercase()}$targetDesc",
                     fontSize = 11.sp,
                     color = BrandPrimary
                   )
@@ -467,6 +473,7 @@ fun CreateOrEditDiscountDialog(
   var selectedCourseId by remember { mutableStateOf(existing?.courseId) }
   var selectedBatchId by remember { mutableStateOf(existing?.batchId) }
   var selectedStudentId by remember { mutableStateOf(existing?.studentId) }
+  var studentSearchQuery by remember { mutableStateOf("") }
   var reason by remember { mutableStateOf(existing?.reason ?: "") }
   var errorText by remember { mutableStateOf<String?>(null) }
 
@@ -553,15 +560,44 @@ fun CreateOrEditDiscountDialog(
           }
         } else if (scope == "student") {
           Text("Select Target Student:", fontSize = 12.sp, color = Slate600)
-          students.take(6).forEach { st ->
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier
-                .fillMaxWidth()
-                .clickable { selectedStudentId = st.id }
-            ) {
-              RadioButton(selected = selectedStudentId == st.id, onClick = { selectedStudentId = st.id })
-              Text("${st.name} (${st.rollNo})", fontSize = 12.sp)
+          OutlinedTextField(
+            value = studentSearchQuery,
+            onValueChange = { studentSearchQuery = it },
+            placeholder = { Text("Search by student name or roll...", fontSize = 12.sp) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) }
+          )
+          val filteredStudents = if (studentSearchQuery.isBlank()) {
+            students
+          } else {
+            students.filter {
+              it.name.contains(studentSearchQuery, ignoreCase = true) ||
+              it.rollNo.contains(studentSearchQuery, ignoreCase = true) ||
+              it.mobile.contains(studentSearchQuery, ignoreCase = true)
+            }
+          }
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(max = 180.dp)
+              .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            if (filteredStudents.isEmpty()) {
+              Text("No matching students found", fontSize = 11.sp, color = Slate600, modifier = Modifier.padding(4.dp))
+            } else {
+              filteredStudents.forEach { st ->
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { selectedStudentId = st.id }
+                ) {
+                  RadioButton(selected = selectedStudentId == st.id, onClick = { selectedStudentId = st.id })
+                  Text("${st.name} (${st.rollNo})", fontSize = 12.sp)
+                }
+              }
             }
           }
         }

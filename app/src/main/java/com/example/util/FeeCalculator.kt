@@ -195,84 +195,156 @@ object FeeCalculator {
     allDiscounts: List<Discount>,
     baseMonthlyFee: Double
   ): DiscountResolution? {
-    var studentDirectResolution: DiscountResolution? = null
-    if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
-      studentDirectResolution = DiscountResolution(
-        discountId = "student-direct",
-        discountTitle = student.discountReason?.ifBlank { "Student Concession" } ?: "Student Concession",
-        discountType = "flat",
-        value = student.monthlyDiscount,
-        calculatedDeduction = minOf(student.monthlyDiscount, baseMonthlyFee)
-      )
-    }
-
     val activeDiscounts = allDiscounts.filter { it.active }
 
     // Find all matching discount rules
-    val matching = activeDiscounts.filter { disc ->
+    val matchingRules = activeDiscounts.filter { disc ->
       // Scope match
-      val scopeMatches = when (disc.scope.lowercase()) {
-        "student" -> disc.studentId.isNullOrBlank() || disc.studentId == student.id
-        "batch" -> disc.batchId.isNullOrBlank() || disc.batchId == student.batchId
-        "course" -> disc.courseId.isNullOrBlank() || disc.courseId == student.courseId
-        "class" -> {
-          val stClass = student.studentClass ?: course?.academicClass ?: ""
-          disc.academicClass.isNullOrBlank() || disc.academicClass.equals(stClass, ignoreCase = true)
+      val scopeMatches = when (disc.scope.trim().lowercase()) {
+        "student" -> {
+          val target = disc.studentId?.trim() ?: ""
+          if (target.isBlank() || target.equals("all", ignoreCase = true)) {
+            true
+          } else {
+            val tokens = target.split(",", ";").map { it.trim().lowercase() }
+            tokens.any { token ->
+              token == student.id.trim().lowercase() ||
+              token == student.rollNo.trim().lowercase() ||
+              token == student.mobile.trim().lowercase() ||
+              token == student.name.trim().lowercase()
+            }
+          }
         }
-        "all" -> true
+        "batch" -> {
+          val target = disc.batchId?.trim() ?: ""
+          if (target.isBlank() || target.equals("all", ignoreCase = true)) {
+            true
+          } else {
+            val tokens = target.split(",", ";").map { it.trim().lowercase() }
+            tokens.any { token ->
+              token == student.batchId.trim().lowercase() ||
+              (batch != null && (token == batch.id.trim().lowercase() || token == batch.name.trim().lowercase()))
+            }
+          }
+        }
+        "course" -> {
+          val target = disc.courseId?.trim() ?: ""
+          if (target.isBlank() || target.equals("all", ignoreCase = true)) {
+            true
+          } else {
+            val tokens = target.split(",", ";").map { it.trim().lowercase() }
+            tokens.any { token ->
+              token == student.courseId.trim().lowercase() ||
+              (course != null && (token == course.id.trim().lowercase() || token == course.title.trim().lowercase()))
+            }
+          }
+        }
+        "class" -> {
+          val target = disc.academicClass?.trim() ?: ""
+          val stClass = (student.studentClass ?: course?.academicClass ?: "").trim().lowercase()
+          if (target.isBlank() || target.equals("all", ignoreCase = true)) {
+            true
+          } else {
+            val tokens = target.split(",", ";").map { it.trim().lowercase() }
+            tokens.any { token -> token == stClass }
+          }
+        }
+        "all", "" -> true
         else -> false
       }
       if (!scopeMatches) return@filter false
 
       // Months match
-      when (disc.applicableMonthsType.lowercase()) {
-        "all_months" -> true
-        "selected_months", "single_month" -> {
+      when (disc.applicableMonthsType.trim().lowercase()) {
+        "all", "all_months", "" -> true
+        "selected_months", "single_month", "selected" -> {
           val sel = disc.selectedMonths ?: emptyList()
-          sel.any { rawM ->
-            val norm = parseIsoOrMonthToYearMonth(rawM)
-            norm == targetYearMonth
+          if (sel.isEmpty()) {
+            true
+          } else {
+            sel.any { rawM ->
+              val norm = parseIsoOrMonthToYearMonth(rawM)
+              norm == targetYearMonth
+            }
           }
         }
         else -> true
       }
     }
 
-    val bestRule = matching.maxByOrNull { disc ->
-      if (disc.type.equals("percentage", ignoreCase = true)) {
+    data class AppliedDiscountItem(
+      val id: String,
+      val title: String,
+      val type: String,
+      val value: Double,
+      val deduction: Double
+    )
+
+    val appliedItems = mutableListOf<AppliedDiscountItem>()
+
+    // Add all matching rule discounts
+    matchingRules.forEach { disc ->
+      val deduction = if (disc.type.equals("percentage", ignoreCase = true)) {
         (baseMonthlyFee * disc.value) / 100.0
       } else {
         disc.value
       }
-    }
-
-    val ruleResolution = bestRule?.let { candidate ->
-      val deduction = if (candidate.type.equals("percentage", ignoreCase = true)) {
-        (baseMonthlyFee * candidate.value) / 100.0
-      } else {
-        candidate.value
-      }
-      DiscountResolution(
-        discountId = candidate.id,
-        discountTitle = candidate.title,
-        discountType = candidate.type,
-        value = candidate.value,
-        calculatedDeduction = minOf(deduction, baseMonthlyFee)
+      appliedItems.add(
+        AppliedDiscountItem(
+          id = disc.id,
+          title = disc.title,
+          type = disc.type,
+          value = disc.value,
+          deduction = deduction
+        )
       )
     }
 
-    return when {
-      studentDirectResolution != null && ruleResolution != null -> {
-        if (studentDirectResolution.calculatedDeduction >= ruleResolution.calculatedDeduction) {
-          studentDirectResolution
-        } else {
-          ruleResolution
-        }
+    // Also include direct student concession from Student profile if configured
+    if (student.monthlyDiscount != null && student.monthlyDiscount > 0) {
+      val directTitle = student.discountReason?.ifBlank { "Student Concession" } ?: "Student Concession"
+      if (appliedItems.none { it.title.equals(directTitle, ignoreCase = true) && it.deduction == student.monthlyDiscount }) {
+        appliedItems.add(
+          AppliedDiscountItem(
+            id = "student-direct",
+            title = directTitle,
+            type = "flat",
+            value = student.monthlyDiscount,
+            deduction = student.monthlyDiscount
+          )
+        )
       }
-      studentDirectResolution != null -> studentDirectResolution
-      ruleResolution != null -> ruleResolution
-      else -> null
     }
+
+    if (appliedItems.isEmpty()) {
+      return null
+    }
+
+    if (appliedItems.size == 1) {
+      val single = appliedItems[0]
+      return DiscountResolution(
+        discountId = single.id,
+        discountTitle = single.title,
+        discountType = single.type,
+        value = single.value,
+        calculatedDeduction = minOf(baseMonthlyFee, single.deduction)
+      )
+    }
+
+    // Multiple discounts applied (e.g. Batch Discount + Particular Student Discount)
+    val totalRawDeduction = appliedItems.sumOf { it.deduction }
+    val combinedTitle = appliedItems.joinToString(" + ") { it.title }
+    val combinedId = appliedItems.joinToString(",") { it.id }
+    val allSameType = appliedItems.all { it.type.equals(appliedItems[0].type, ignoreCase = true) }
+    val combinedType = if (allSameType) appliedItems[0].type else "combined"
+
+    return DiscountResolution(
+      discountId = combinedId,
+      discountTitle = combinedTitle,
+      discountType = combinedType,
+      value = totalRawDeduction,
+      calculatedDeduction = minOf(baseMonthlyFee, totalRawDeduction)
+    )
   }
 
   fun calculateStudentDuesSummary(

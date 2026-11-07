@@ -463,8 +463,7 @@ class FeeCalculatorTest {
       active = true
     )
 
-    // When rule is smaller than student concession, student concession (120) takes precedence
-    val discResolved1 = FeeCalculator.resolveApplicableDiscount(
+    val discResolved = FeeCalculator.resolveApplicableDiscount(
       student = student,
       course = course,
       batch = null,
@@ -472,32 +471,171 @@ class FeeCalculatorTest {
       allDiscounts = listOf(smallerRule),
       baseMonthlyFee = 400.0
     )
-    assertNotNull(discResolved1)
-    assertEquals(120.0, discResolved1?.calculatedDeduction ?: 0.0, 0.01)
+    assertNotNull(discResolved)
+    // Direct concession (120) + small promotion (80) = 200
+    assertEquals(200.0, discResolved?.calculatedDeduction ?: 0.0, 0.01)
+  }
 
-    val biggerRule = Discount(
-      id = "disc-big",
-      title = "Mega Discount",
+  @Test
+  fun testMultipleDiscountsWithDirectStudentConcession() {
+    val student = Student(
+      id = "stu-disc-compare",
+      rollNo = "PP-DISC-01",
+      name = "Suresh Sen",
+      mobile = "9876543210",
+      aadhaarNo = "123456789012",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z",
+      monthlyDiscount = 120.0 // Student concession
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 400.0)
+
+    val promotionRule = Discount(
+      id = "disc-small",
+      title = "Course Promotion",
       type = "flat",
-      value = 150.0,
+      value = 80.0,
       scope = "course",
       courseId = course.id,
       applicableMonthsType = "all",
       active = true
     )
 
-    // When rule is bigger than student concession, the bigger discount rule (150) takes precedence
-    val discResolved2 = FeeCalculator.resolveApplicableDiscount(
+    // Both direct concession (120) and course promotion (80) are combined = 200
+    val discResolved = FeeCalculator.resolveApplicableDiscount(
       student = student,
       course = course,
       batch = null,
       targetYearMonth = "2026-07",
-      allDiscounts = listOf(biggerRule),
+      allDiscounts = listOf(promotionRule),
       baseMonthlyFee = 400.0
     )
-    assertNotNull(discResolved2)
-    assertEquals(150.0, discResolved2?.calculatedDeduction ?: 0.0, 0.01)
-    assertEquals("Mega Discount", discResolved2?.discountTitle)
+    assertNotNull(discResolved)
+    assertEquals(200.0, discResolved?.calculatedDeduction ?: 0.0, 0.01)
+  }
+
+  @Test
+  fun testMultipleDiscountsForBatchAndParticularStudentCombined() {
+    val student = Student(
+      id = "stu-multi-disc-1",
+      rollNo = "PP-2026-005",
+      name = "Avinandan Dan",
+      mobile = "7001561342",
+      aadhaarNo = "943892479593",
+      courseId = "course-1",
+      batchId = "batch-101",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+
+    val course = Course(
+      id = "course-1",
+      title = "Computer Science",
+      monthlyFee = 400.0
+    )
+
+    val batch = Batch(
+      id = "batch-101",
+      courseId = "course-1",
+      name = "Evening CS Batch"
+    )
+
+    // 1. Discount for full batch: ₹100 flat
+    val batchDiscount = Discount(
+      id = "disc-batch",
+      title = "Batch Special Discount",
+      type = "flat",
+      value = 100.0,
+      scope = "batch",
+      batchId = "batch-101",
+      applicableMonthsType = "all_months",
+      active = true
+    )
+
+    // 2. Discount for particular student: ₹50 flat
+    val studentDiscount = Discount(
+      id = "disc-student",
+      title = "Merit Concession",
+      type = "flat",
+      value = 50.0,
+      scope = "student",
+      studentId = student.id,
+      applicableMonthsType = "all_months",
+      active = true
+    )
+
+    val discountsList = listOf(batchDiscount, studentDiscount)
+
+    val resolution = FeeCalculator.resolveApplicableDiscount(
+      student = student,
+      course = course,
+      batch = batch,
+      targetYearMonth = "2026-07",
+      allDiscounts = discountsList,
+      baseMonthlyFee = 400.0
+    )
+
+    assertNotNull(resolution)
+    // Both batch discount (100) and student discount (50) must be applied: 150
+    assertEquals(150.0, resolution?.calculatedDeduction ?: 0.0, 0.01)
+    assertTrue(resolution?.discountTitle?.contains("Batch Special Discount") == true)
+    assertTrue(resolution?.discountTitle?.contains("Merit Concession") == true)
+
+    // Test in full fee dues summary
+    val summary = FeeCalculator.calculateStudentDuesSummary(
+      student = student,
+      course = course,
+      batch = batch,
+      discounts = discountsList,
+      payments = emptyList(),
+      targetUpToMonth = "2026-07"
+    )
+
+    val july = summary.allMonths.first { it.yearMonth == "2026-07" }
+    assertEquals(400.0, july.baseFee, 0.01)
+    assertEquals(150.0, july.discountAmount, 0.01)
+    assertEquals(250.0, july.netPayable, 0.01)
+    assertEquals(250.0, july.remainingDue, 0.01)
+    assertEquals(250.0, summary.totalOutstandingDue, 0.01)
+  }
+
+  @Test
+  fun testStudentDiscountMatchedByRollNoOrName() {
+    val student = Student(
+      id = "stu-uuid-999",
+      rollNo = "PP-2026-999",
+      name = "Subrata Roy",
+      mobile = "9876500000",
+      aadhaarNo = "111122223333",
+      courseId = "course-1",
+      batchId = "batch-1",
+      admissionDate = "2026-06-30T18:30:00.000Z"
+    )
+    val course = Course(id = "course-1", title = "CS", monthlyFee = 500.0)
+
+    // Discount created in sheet with Target Student ID = Roll No "PP-2026-999"
+    val discountByRoll = Discount(
+      id = "disc-roll",
+      title = "Roll Based Discount",
+      type = "flat",
+      value = 75.0,
+      scope = "student",
+      studentId = "PP-2026-999",
+      applicableMonthsType = "all_months",
+      active = true
+    )
+
+    val res = FeeCalculator.resolveApplicableDiscount(
+      student = student,
+      course = course,
+      batch = null,
+      targetYearMonth = "2026-07",
+      allDiscounts = listOf(discountByRoll),
+      baseMonthlyFee = 500.0
+    )
+    assertNotNull(res)
+    assertEquals(75.0, res?.calculatedDeduction ?: 0.0, 0.01)
+    assertEquals("Roll Based Discount", res?.discountTitle)
   }
 
   @Test
