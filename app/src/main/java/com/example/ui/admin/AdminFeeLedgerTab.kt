@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,12 +42,67 @@ fun AdminFeeLedgerTab(
 ) {
   val context = LocalContext.current
   var selectedSubTab by remember { mutableIntStateOf(0) } // 0: Receipts Ledger, 1: Outstanding Dues
+  var selectedClassFilter by remember { mutableStateOf("ALL") }
   var duesFilterOnlyWithDues by remember { mutableStateOf(false) }
   var deletingPayment by remember { mutableStateOf<FeePayment?>(null) }
 
-  // Compute stats across all students
-  val studentSummaries = remember(students, courses, batches, discounts, payments) {
-    students.map { st ->
+  val availableClasses = remember(courses, students) {
+    val list = mutableListOf("ALL")
+    val seen = mutableSetOf("all")
+    courses.forEach { c ->
+      val label = c.academicClass.ifBlank { c.title }.trim()
+      if (label.isNotBlank() && seen.add(label.lowercase())) list.add(label)
+    }
+    students.forEach { st ->
+      val label = st.studentClass?.trim().orEmpty()
+      if (label.isNotBlank() && seen.add(label.lowercase())) list.add(label)
+    }
+    list
+  }
+
+  val classCounts = remember(availableClasses, students, courses) {
+    availableClasses.associateWith { cls ->
+      if (cls == "ALL") students.size
+      else students.count { st ->
+        val c = courses.firstOrNull { it.id == st.courseId }
+        (c?.academicClass?.equals(cls, ignoreCase = true) == true) ||
+          (c?.title?.equals(cls, ignoreCase = true) == true) ||
+          (st.studentClass?.equals(cls, ignoreCase = true) == true)
+      }
+    }
+  }
+
+  val classFilteredStudents = remember(students, courses, selectedClassFilter) {
+    if (selectedClassFilter == "ALL") {
+      students
+    } else {
+      students.filter { st ->
+        val c = courses.firstOrNull { it.id == st.courseId }
+        (c?.academicClass?.equals(selectedClassFilter, ignoreCase = true) == true) ||
+          (c?.title?.equals(selectedClassFilter, ignoreCase = true) == true) ||
+          (st.studentClass?.equals(selectedClassFilter, ignoreCase = true) == true)
+      }
+    }
+  }
+
+  val classStudentIds = remember(classFilteredStudents) {
+    classFilteredStudents.map { it.id }.toSet()
+  }
+
+  val filteredPayments = remember(payments, selectedClassFilter, classStudentIds) {
+    if (selectedClassFilter == "ALL") {
+      payments
+    } else {
+      payments.filter { p ->
+        p.studentId in classStudentIds ||
+          p.courseTitle.equals(selectedClassFilter, ignoreCase = true)
+      }
+    }
+  }
+
+  // Compute stats across filtered students
+  val studentSummaries = remember(classFilteredStudents, courses, batches, discounts, payments) {
+    classFilteredStudents.map { st ->
       val course = courses.firstOrNull { it.id == st.courseId }
       val batch = batches.firstOrNull { it.id == st.batchId }
       val summary = FeeCalculator.calculateStudentDuesSummary(
@@ -142,7 +198,7 @@ fun AdminFeeLedgerTab(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Text(
-                text = "Receipts Ledger (${payments.size})",
+                text = "Receipts Ledger (${filteredPayments.size})",
                 fontSize = 13.sp,
                 fontWeight = if (selectedSubTab == 0) FontWeight.Bold else FontWeight.Medium,
                 color = if (selectedSubTab == 0) Slate900 else Slate600
@@ -172,10 +228,62 @@ fun AdminFeeLedgerTab(
               )
               Spacer(modifier = Modifier.width(6.dp))
               Text(
-                text = "Outstanding Dues (${students.size})",
+                text = "Outstanding Dues (${classFilteredStudents.size})",
                 fontSize = 13.sp,
                 fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Medium,
                 color = if (selectedSubTab == 1) Slate900 else Slate600
+              )
+            }
+          }
+        }
+
+        // Class-Wise Quick Access Bar
+        if (availableClasses.size > 1) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.School, contentDescription = null, tint = BrandPrimary, modifier = Modifier.size(14.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Class-Wise Quick Access:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Slate700)
+            }
+            if (selectedClassFilter != "ALL") {
+              Text(
+                text = "$selectedClassFilter (${classFilteredStudents.size})",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = BrandPrimary
+              )
+            }
+          }
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            availableClasses.forEach { cls ->
+              val isSelected = selectedClassFilter == cls
+              val count = classCounts[cls] ?: 0
+              FilterChip(
+                selected = isSelected,
+                onClick = { selectedClassFilter = cls },
+                label = {
+                  Text(
+                    text = if (cls == "ALL") "All Classes ($count)" else "$cls ($count)",
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                  )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                  selectedContainerColor = BrandPrimary,
+                  selectedLabelColor = Color.White
+                ),
+                modifier = Modifier.testTag("dues_class_quick_access_${cls.lowercase().replace(" ", "_")}")
               )
             }
           }
@@ -207,7 +315,7 @@ fun AdminFeeLedgerTab(
           }
         }
 
-        if (payments.isEmpty()) {
+        if (filteredPayments.isEmpty()) {
           item {
             Card(
               shape = RoundedCornerShape(14.dp),
@@ -215,7 +323,10 @@ fun AdminFeeLedgerTab(
               modifier = Modifier.fillMaxWidth()
             ) {
               Text(
-                text = "No fee receipts recorded yet. Click 'Collect Fee' above to record one.",
+                text = if (selectedClassFilter == "ALL")
+                  "No fee receipts recorded yet. Click 'Collect Fee' above to record one."
+                else
+                  "No fee receipts found for $selectedClassFilter.",
                 modifier = Modifier.padding(20.dp),
                 fontSize = 13.sp,
                 color = Slate600
@@ -223,7 +334,7 @@ fun AdminFeeLedgerTab(
             }
           }
         } else {
-          items(payments) { p ->
+          items(filteredPayments) { p ->
             val isRejected = p.status.equals("rejected", ignoreCase = true)
             val isPending = p.status.equals("pending", ignoreCase = true)
 
@@ -475,7 +586,7 @@ fun AdminFeeLedgerTab(
               shape = RoundedCornerShape(8.dp),
               contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-              Text("All Admitted (${students.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Text("All Admitted (${classFilteredStudents.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
 
             if (studentsWithDues.isNotEmpty()) {

@@ -25,25 +25,25 @@ class ClassSyncReceiver : BroadcastReceiver() {
           if (student != null) {
             val liveClasses = dto.liveClasses ?: emptyList()
             val batches = dto.batches ?: emptyList()
+            val courses = dto.courses ?: emptyList()
 
             // Post notifications for any scheduled or postponed class
             NotificationHelper.syncStudentClassNotification(
               context = context,
               student = student,
               liveClasses = liveClasses,
-              batches = batches
+              batches = batches,
+              courses = courses
             )
 
             // Setup or cancel 30-min alarms for student's relevant classes
             liveClasses.forEach { session ->
-              val sessBatch = session.batchId?.trim() ?: ""
-              val sessCourse = session.courseId?.trim() ?: ""
-              val isRelevant = when {
-                sessBatch.isNotEmpty() && !sessBatch.equals("all", ignoreCase = true) -> sessBatch == student.batchId
-                sessBatch.equals("all", ignoreCase = true) -> sessCourse.isEmpty() || sessCourse == student.courseId
-                sessCourse.isNotEmpty() -> sessCourse == student.courseId
-                else -> true
-              }
+              val isRelevant = BatchScheduleHelper.isClassSessionForStudent(
+                session = session,
+                student = student,
+                courses = courses,
+                batches = batches
+              )
               if (isRelevant) {
                 if (session.isPostponed || session.status.equals("postponed", ignoreCase = true)) {
                   InAppAlarmScheduler.cancelClassAlarm(context, session.id)

@@ -147,11 +147,13 @@ class PathsalaRepository private constructor(private val context: Context) {
           // Automatically sync class schedule and postpone notification in real-time
           val classes = dto.liveClasses ?: _liveClasses.value
           val bts = dto.batches ?: _batches.value
+          val crs = dto.courses ?: _courses.value
           com.example.util.NotificationHelper.syncStudentClassNotification(
             context = context,
             student = updatedStudent,
             liveClasses = classes,
-            batches = bts
+            batches = bts,
+            courses = crs
           )
         }
       }.onFailure { err ->
@@ -926,7 +928,8 @@ class PathsalaRepository private constructor(private val context: Context) {
           context = context,
           student = st,
           liveClasses = _liveClasses.value,
-          batches = _batches.value
+          batches = _batches.value,
+          courses = _courses.value
         )
       }
 
@@ -968,7 +971,8 @@ class PathsalaRepository private constructor(private val context: Context) {
           context = context,
           student = st,
           liveClasses = _liveClasses.value,
-          batches = _batches.value
+          batches = _batches.value,
+          courses = _courses.value
         )
       }
 

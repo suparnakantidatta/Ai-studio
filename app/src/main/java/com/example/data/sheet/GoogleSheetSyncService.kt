@@ -257,6 +257,7 @@ class GoogleSheetSyncService {
         put("action", if (session.isPostponed) "postponeClass" else "scheduleClass")
         put("id", session.id)
         put("title", session.title)
+        put("academicClass", session.academicClass ?: "")
         put("subject", session.subject)
         put("courseId", session.courseId ?: "")
         put("batchId", session.batchId ?: "")
@@ -593,7 +594,7 @@ class GoogleSheetSyncService {
       val row = JSONArray().apply {
         put(s.id)
         put(s.title)
-        put(s.academicClass ?: "Class 11")
+        put(s.academicClass ?: "")
         put(s.subject)
         put(s.courseId ?: "")
         put(s.batchId ?: "")
@@ -1261,7 +1262,7 @@ class GoogleSheetSyncService {
           id = id,
           title = title,
           academicClass = optCell(row, 2),
-          subject = optCell(row, 3).ifBlank { "Computer Science" },
+          subject = optCell(row, 3),
           courseId = optCell(row, 4),
           batchId = optCell(row, 5),
           educatorName = optCell(row, 6).ifBlank { "Faculty" },

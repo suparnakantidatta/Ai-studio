@@ -169,11 +169,12 @@ object NotificationHelper {
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
       )
 
+      val displaySubject = subject.ifBlank { "All Subjects" }
       val notifTitle = if (isPostponed) "⚠️ Class Postponed: $title" else "📅 Class Scheduled: $title"
       val notifBody = if (isPostponed) {
         "Status: Class postponed by faculty. Scheduled: $scheduledDate at $startTime. Tap for updates."
       } else {
-        "Class scheduled on $scheduledDate at $startTime ($subject - ${batchName ?: "Regular"}). Tap to open."
+        "Class scheduled on $scheduledDate at $startTime ($displaySubject - ${batchName ?: "All Batches"}). Tap to open."
       }
 
       val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
@@ -235,24 +236,28 @@ object NotificationHelper {
     context: Context,
     student: com.example.data.model.Student,
     liveClasses: List<com.example.data.model.LiveClassSession>,
-    batches: List<com.example.data.model.Batch>
+    batches: List<com.example.data.model.Batch>,
+    courses: List<com.example.data.model.Course> = emptyList()
   ) {
     val studentBatch = batches.firstOrNull { it.id == student.batchId }
     val relevantClasses = liveClasses.filter { session ->
-      val sessBatch = session.batchId?.trim() ?: ""
-      val sessCourse = session.courseId?.trim() ?: ""
-      when {
-        sessBatch.isNotEmpty() && !sessBatch.equals("all", ignoreCase = true) -> sessBatch == student.batchId
-        sessBatch.equals("all", ignoreCase = true) -> sessCourse.isEmpty() || sessCourse == student.courseId
-        sessCourse.isNotEmpty() -> sessCourse == student.courseId
-        else -> true
-      }
+      BatchScheduleHelper.isClassSessionForStudent(
+        session = session,
+        student = student,
+        courses = courses,
+        batches = batches
+      )
     }
 
     // Loop through all relevant classes and notify once per scheduled or postponed state
     relevantClasses.forEach { session ->
       if (session.isPostponed || session.status.equals("postponed", ignoreCase = true) || session.status.equals("scheduled", ignoreCase = true)) {
-        notifyClassEventOnce(context, session, studentBatch?.name)
+        val batchLabel = if (BatchScheduleHelper.isAllToken(session.batchId)) {
+          session.academicClass?.takeIf { !BatchScheduleHelper.isAllToken(it) } ?: "All Batches"
+        } else {
+          studentBatch?.name
+        }
+        notifyClassEventOnce(context, session, batchLabel)
       }
     }
   }

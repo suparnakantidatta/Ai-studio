@@ -935,13 +935,52 @@ fun AdminFeeDeskTab(
 
   val availableClasses = remember(courses, students) {
     val list = mutableListOf("ALL")
+    val seen = mutableSetOf("all")
     courses.forEach { c ->
-      val label = c.academicClass.ifBlank { c.title }
-      if (label.isNotBlank() && label !in list) list.add(label)
+      val label = c.academicClass.ifBlank { c.title }.trim()
+      if (label.isNotBlank() && seen.add(label.lowercase())) list.add(label)
+    }
+    students.forEach { st ->
+      val label = st.studentClass?.trim().orEmpty()
+      if (label.isNotBlank() && seen.add(label.lowercase())) list.add(label)
     }
     list
   }
   val availableModes = listOf("ALL", "OFFLINE", "ONLINE")
+
+  val classCounts = remember(availableClasses, students, courses) {
+    availableClasses.associateWith { cls ->
+      if (cls == "ALL") students.size
+      else students.count { st ->
+        val c = courses.firstOrNull { it.id == st.courseId }
+        (c?.academicClass?.equals(cls, ignoreCase = true) == true) ||
+          (c?.title?.equals(cls, ignoreCase = true) == true) ||
+          (st.studentClass?.equals(cls, ignoreCase = true) == true)
+      }
+    }
+  }
+
+  val selectClassQuickAccess: (String) -> Unit = { cls ->
+    selectedClassFilter = cls
+    messageText = null
+    val matchingInClass = students.filter { st ->
+      if (cls == "ALL") true
+      else {
+        val c = courses.firstOrNull { it.id == st.courseId }
+        (c?.academicClass?.equals(cls, ignoreCase = true) == true) ||
+          (c?.title?.equals(cls, ignoreCase = true) == true) ||
+          (st.studentClass?.equals(cls, ignoreCase = true) == true)
+      }
+    }
+    if (matchingInClass.isNotEmpty() && matchingInClass.none { it.id == selectedStudent?.id }) {
+      val preferred = matchingInClass.firstOrNull { st ->
+        val c = courses.firstOrNull { it.id == st.courseId }
+        val b = batches.firstOrNull { it.id == st.batchId }
+        FeeCalculator.calculateStudentDuesSummary(st, c, b, discounts, payments).totalOutstandingDue > 0.0
+      } ?: matchingInClass.first()
+      selectedStudent = preferred
+    }
+  }
 
   val filteredStudents = remember(searchQuery, selectedClassFilter, selectedModeFilter, students, courses, batches) {
     students.filter { st ->
@@ -966,7 +1005,7 @@ fun AdminFeeDeskTab(
     }
   }
 
-  val currentStudent = students.firstOrNull { it.id == selectedStudent?.id } ?: selectedStudent ?: students.firstOrNull()
+  val currentStudent = students.firstOrNull { it.id == selectedStudent?.id } ?: selectedStudent ?: filteredStudents.firstOrNull() ?: students.firstOrNull()
   val selectedCourse = courses.firstOrNull { it.id == currentStudent?.courseId }
   val selectedBatch = batches.firstOrNull { it.id == currentStudent?.batchId }
 
@@ -1087,6 +1126,66 @@ fun AdminFeeDeskTab(
       }
     }
 
+    // Class-Wise Quick Access Buttons
+    if (availableClasses.size > 1) {
+      item {
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = Color.White),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.School, contentDescription = null, tint = BrandPrimary, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Class-Wise Quick Access", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Slate900)
+              }
+              Text(
+                text = if (selectedClassFilter == "ALL") "${students.size} students" else "${filteredStudents.size} in $selectedClassFilter",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = BrandPrimary
+              )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              availableClasses.forEach { cls ->
+                val isSelected = selectedClassFilter == cls
+                val count = classCounts[cls] ?: 0
+                FilterChip(
+                  selected = isSelected,
+                  onClick = { selectClassQuickAccess(cls) },
+                  label = {
+                    Text(
+                      text = if (cls == "ALL") "All Classes ($count)" else "$cls ($count)",
+                      fontSize = 12.sp,
+                      fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                  },
+                  colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = BrandPrimary,
+                    selectedLabelColor = Color.White
+                  ),
+                  modifier = Modifier.testTag("collection_class_quick_access_${cls.lowercase().replace(" ", "_")}")
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
     // PENDING APPROVALS QUEUE (CRITICAL REQUEST)
     if (pendingPayments.isNotEmpty()) {
       item {
@@ -1197,7 +1296,7 @@ fun AdminFeeDeskTab(
             availableClasses.forEach { cls ->
               FilterChip(
                 selected = selectedClassFilter == cls,
-                onClick = { selectedClassFilter = cls },
+                onClick = { selectClassQuickAccess(cls) },
                 label = { Text(cls, fontSize = 11.sp) }
               )
             }

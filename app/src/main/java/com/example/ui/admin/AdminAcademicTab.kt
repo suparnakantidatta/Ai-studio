@@ -28,6 +28,7 @@ import com.example.data.model.Course
 import com.example.data.model.LiveClassSession
 import com.example.data.model.StudyMaterial
 import com.example.ui.theme.*
+import com.example.util.BatchScheduleHelper
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -77,11 +78,33 @@ fun AdminAcademicTab(
   var rescheduleEndTimeText by remember { mutableStateOf("") }
   var rescheduleReasonText by remember { mutableStateOf("") }
 
-  val displayedClasses = remember(liveClasses, selectedBatchFilter) {
+  val displayedClasses = remember(liveClasses, selectedBatchFilter, batches, courses) {
     if (selectedBatchFilter == null) {
       liveClasses
     } else {
-      liveClasses.filter { it.batchId == selectedBatchFilter }
+      val filterBatch = batches.firstOrNull { it.id == selectedBatchFilter }
+      val filterCourse = courses.firstOrNull { it.id == filterBatch?.courseId }
+      liveClasses.filter { session ->
+        when {
+          !BatchScheduleHelper.isAllToken(session.batchId) ->
+            session.batchId.equals(selectedBatchFilter, ignoreCase = true)
+          !BatchScheduleHelper.isAllToken(session.courseId) ->
+            session.courseId.equals(filterBatch?.courseId, ignoreCase = true)
+          !BatchScheduleHelper.isAllToken(session.academicClass) &&
+            !BatchScheduleHelper.isAllToken(session.subject) &&
+            !session.subject.equals("general", ignoreCase = true) -> {
+            val classMatch = (filterCourse?.academicClass?.equals(session.academicClass, ignoreCase = true) == true) ||
+              (filterCourse?.title?.contains(session.academicClass ?: "", ignoreCase = true) == true)
+            classMatch && BatchScheduleHelper.matchesSubject(session.subject, filterCourse, filterBatch)
+          }
+          !BatchScheduleHelper.isAllToken(session.academicClass) ->
+            (filterCourse?.academicClass?.equals(session.academicClass, ignoreCase = true) == true) ||
+              (filterCourse?.title?.contains(session.academicClass ?: "", ignoreCase = true) == true)
+          !BatchScheduleHelper.isAllToken(session.subject) && !session.subject.equals("general", ignoreCase = true) ->
+            BatchScheduleHelper.matchesSubject(session.subject, filterCourse, filterBatch)
+          else -> true
+        }
+      }
     }
   }
 
@@ -184,10 +207,10 @@ fun AdminAcademicTab(
             FilterChip(
               selected = selectedBatchFilter == null,
               onClick = { selectedBatchFilter = null },
-              label = { Text("All Batches (${displayedClasses.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+              label = { Text("All (${liveClasses.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
             )
             batches.forEach { b ->
-              val count = liveClasses.count { it.batchId == b.id }
+              val count = liveClasses.count { it.batchId.equals(b.id, ignoreCase = true) }
               FilterChip(
                 selected = selectedBatchFilter == b.id,
                 onClick = { selectedBatchFilter = if (selectedBatchFilter == b.id) null else b.id },
@@ -258,13 +281,26 @@ fun AdminAcademicTab(
                   fontWeight = FontWeight.SemiBold,
                   color = if (session.isPostponed) ErrorRed else BrandPrimary
                 )
+                val batchTargetLabel = if (BatchScheduleHelper.isAllToken(session.batchId)) {
+                  when {
+                    !BatchScheduleHelper.isAllToken(session.courseId) ->
+                      "All Batches (${course?.title ?: session.courseId})"
+                    !BatchScheduleHelper.isAllToken(session.academicClass) ->
+                      "All Batches (${session.academicClass})"
+                    !BatchScheduleHelper.isAllToken(session.subject) && !session.subject.equals("general", ignoreCase = true) ->
+                      "All Batches (${session.subject})"
+                    else -> "All Batches (Center-wide)"
+                  }
+                } else {
+                  "${batch?.name ?: "Batch"} (${batch?.scheduleDays ?: "Scheduled"})"
+                }
                 Text(
-                  text = "Batch: ${batch?.name ?: "Main Batch"} (${batch?.scheduleDays ?: "Scheduled"}) • Mode: ${session.platform}",
+                  text = "Target: $batchTargetLabel • Mode: ${session.platform}",
                   fontSize = 11.sp,
                   color = Slate600
                 )
                 Text(
-                  text = "Subject: ${session.subject} • Faculty: ${session.educatorName}",
+                  text = "Subject: ${session.subject.ifBlank { "All Subjects" }} • Faculty: ${session.educatorName}",
                   fontSize = 11.sp,
                   color = Slate600
                 )
@@ -854,11 +890,49 @@ fun ScheduleClassDialog(
   onDismiss: () -> Unit,
   onSave: (LiveClassSession) -> Unit
 ) {
+  val uniqueClassLabels = remember(courses) {
+    courses.map { it.academicClass.ifBlank { it.title } }
+      .map { it.trim() }
+      .filter { it.isNotBlank() && !BatchScheduleHelper.isAllToken(it) }
+      .distinct()
+  }
+
+  val initialTargetMode = remember(existing) {
+    when {
+      existing == null -> 0 // Specific Batch
+      !BatchScheduleHelper.isAllToken(existing.batchId) -> 0
+      !BatchScheduleHelper.isAllToken(existing.academicClass) -> 1 // All Batches (Class)
+      !BatchScheduleHelper.isAllToken(existing.courseId) ||
+        (!BatchScheduleHelper.isAllToken(existing.subject) && !existing.subject.equals("general", ignoreCase = true)) -> 2 // All Batches (Subject)
+      else -> 3 // All Students
+    }
+  }
+
+  var targetMode by remember { mutableIntStateOf(initialTargetMode) }
   var title by remember { mutableStateOf(existing?.title ?: "") }
-  var subject by remember { mutableStateOf(existing?.subject ?: "Mathematics") }
+  var subject by remember { mutableStateOf(existing?.subject ?: courses.firstOrNull()?.title ?: "Computer Science") }
   var educator by remember { mutableStateOf(existing?.educatorName ?: "Prof. S. Datta") }
-  var selectedCourseId by remember { mutableStateOf(existing?.courseId ?: courses.firstOrNull()?.id ?: "") }
-  var selectedBatchId by remember { mutableStateOf(existing?.batchId ?: batches.firstOrNull()?.id ?: "") }
+  var selectedCourseId by remember {
+    mutableStateOf(
+      existing?.courseId?.takeIf { it.isNotBlank() }
+        ?: courses.firstOrNull()?.id
+        ?: "all"
+    )
+  }
+  var selectedBatchId by remember {
+    mutableStateOf(
+      existing?.batchId?.takeIf { it.isNotBlank() }
+        ?: batches.firstOrNull()?.id
+        ?: "all"
+    )
+  }
+  var selectedAcademicClass by remember {
+    mutableStateOf(
+      existing?.academicClass?.takeIf { it.isNotBlank() && !BatchScheduleHelper.isAllToken(it) }
+        ?: uniqueClassLabels.firstOrNull()
+        ?: "Class 11"
+    )
+  }
   var scheduledDate by remember {
     mutableStateOf(
       existing?.scheduledDate?.ifBlank {
@@ -894,9 +968,9 @@ fun ScheduleClassDialog(
 
         OutlinedTextField(
           value = subject,
-          onValueChange = { subject = it },
-          label = { Text("Subject *") },
-          placeholder = { Text("Math, Science, Bengali, English...") },
+          onValueChange = { subject = it; errorText = null },
+          label = { Text(if (targetMode == 2) "Target Subject / Topic *" else "Subject (or All)") },
+          placeholder = { Text("Computer Science, Mathematics, Physics...") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth()
         )
@@ -909,16 +983,148 @@ fun ScheduleClassDialog(
           modifier = Modifier.fillMaxWidth()
         )
 
-        Text("Target Admission Batch:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
+        Text("Schedule For (Target Scope):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
         Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          batches.forEach { b ->
+          listOf(
+            0 to "Specific Batch",
+            1 to "All Batches (Class)",
+            2 to "All Batches (Subject)",
+            3 to "All Students"
+          ).forEach { (modeIdx, modeLabel) ->
             FilterChip(
-              selected = selectedBatchId == b.id,
-              onClick = { selectedBatchId = b.id },
-              label = { Text(b.name, fontSize = 11.sp) }
+              selected = targetMode == modeIdx,
+              onClick = {
+                targetMode = modeIdx
+                when (modeIdx) {
+                  0 -> {
+                    val b = batches.firstOrNull { it.id == selectedBatchId } ?: batches.firstOrNull()
+                    if (b != null) {
+                      selectedBatchId = b.id
+                      selectedCourseId = b.courseId
+                      courses.firstOrNull { it.id == b.courseId }?.let { c ->
+                        if (c.academicClass.isNotBlank()) selectedAcademicClass = c.academicClass
+                      }
+                    }
+                  }
+                  1 -> {
+                    selectedBatchId = "all"
+                    selectedCourseId = "all"
+                    if (selectedAcademicClass.isBlank()) {
+                      selectedAcademicClass = uniqueClassLabels.firstOrNull() ?: "Class 11"
+                    }
+                  }
+                  2 -> {
+                    selectedBatchId = "all"
+                    selectedAcademicClass = "all"
+                  }
+                  3 -> {
+                    selectedBatchId = "all"
+                    selectedCourseId = "all"
+                    selectedAcademicClass = "all"
+                  }
+                }
+              },
+              label = { Text(modeLabel, fontSize = 11.sp, fontWeight = FontWeight.Medium) }
+            )
+          }
+        }
+
+        when (targetMode) {
+          0 -> {
+            Text("Target Admission Batch:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              batches.forEach { b ->
+                FilterChip(
+                  selected = selectedBatchId == b.id,
+                  onClick = {
+                    selectedBatchId = b.id
+                    selectedCourseId = b.courseId
+                    courses.firstOrNull { it.id == b.courseId }?.let { c ->
+                      if (c.academicClass.isNotBlank()) selectedAcademicClass = c.academicClass
+                    }
+                  },
+                  label = { Text(b.name, fontSize = 11.sp) }
+                )
+              }
+            }
+          }
+          1 -> {
+            Text("Target Class (All Batches of this Class):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
+            if (uniqueClassLabels.isNotEmpty()) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                uniqueClassLabels.forEach { clsLabel ->
+                  FilterChip(
+                    selected = selectedAcademicClass.equals(clsLabel, ignoreCase = true),
+                    onClick = { selectedAcademicClass = clsLabel },
+                    label = { Text(clsLabel, fontSize = 11.sp) }
+                  )
+                }
+              }
+            }
+            OutlinedTextField(
+              value = selectedAcademicClass,
+              onValueChange = { selectedAcademicClass = it },
+              label = { Text("Academic Class / Grade *") },
+              placeholder = { Text("e.g. Class 11, Class 12, XI, XII") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth()
+            )
+          }
+          2 -> {
+            Text("Target Course / Subject (All Batches):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              FilterChip(
+                selected = BatchScheduleHelper.isAllToken(selectedCourseId),
+                onClick = { selectedCourseId = "all" },
+                label = { Text("Cross-Class Subject (All)", fontSize = 11.sp) }
+              )
+              courses.forEach { c ->
+                FilterChip(
+                  selected = selectedCourseId == c.id,
+                  onClick = {
+                    selectedCourseId = c.id
+                    if (subject.isBlank() || subject.equals("General", true) || subject.equals("All", true)) {
+                      subject = c.title
+                    }
+                  },
+                  label = { Text(c.title, fontSize = 11.sp) }
+                )
+              }
+            }
+            Text(
+              text = if (BatchScheduleHelper.isAllToken(selectedCourseId))
+                "Matches all batches across classes whose course/subject matches \"$subject\"."
+              else
+                "Matches all batches enrolled in ${courses.firstOrNull { it.id == selectedCourseId }?.title ?: "selected course"}.",
+              fontSize = 11.sp,
+              color = Slate500
+            )
+          }
+          3 -> {
+            Text(
+              text = "Applies to all enrolled students across every batch, class, and subject.",
+              fontSize = 11.sp,
+              color = Slate600
             )
           }
         }
@@ -992,19 +1198,42 @@ fun ScheduleClassDialog(
             errorText = "Please enter class title"
             return@Button
           }
+          if (targetMode == 1 && selectedAcademicClass.isBlank()) {
+            errorText = "Please enter or select the target academic class"
+            return@Button
+          }
+          if (targetMode == 2 && BatchScheduleHelper.isAllToken(selectedCourseId) && subject.isBlank()) {
+            errorText = "Please enter the target subject name"
+            return@Button
+          }
+          val finalBatchId = if (targetMode == 0) selectedBatchId else "all"
+          val finalCourseId = when (targetMode) {
+            0 -> batches.firstOrNull { it.id == selectedBatchId }?.courseId ?: selectedCourseId
+            2 -> selectedCourseId
+            else -> "all"
+          }
+          val finalAcademicClass = when (targetMode) {
+            0 -> courses.firstOrNull { it.id == finalCourseId }?.academicClass
+            1 -> selectedAcademicClass.trim()
+            else -> "all"
+          }
           val session = LiveClassSession(
             id = existing?.id ?: "class-${System.currentTimeMillis()}",
             title = title.trim(),
-            subject = subject.trim(),
-            courseId = selectedCourseId,
-            batchId = selectedBatchId,
+            subject = subject.trim().ifBlank { if (targetMode == 1) "All" else "General" },
+            academicClass = finalAcademicClass,
+            courseId = finalCourseId,
+            batchId = finalBatchId,
             educatorName = educator.trim(),
             scheduledDate = scheduledDate.trim(),
             startTime = startTime.trim(),
             endTime = endTime.trim(),
             status = status,
             platform = platform.trim(),
-            meetingUrl = meetingUrl.trim().ifBlank { "https://meet.google.com/new" }
+            meetingUrl = meetingUrl.trim().ifBlank { "https://meet.google.com/new" },
+            isPostponed = existing?.isPostponed ?: false,
+            postponeReason = existing?.postponeReason,
+            notificationSent = existing?.notificationSent ?: false
           )
           onSave(session)
         },

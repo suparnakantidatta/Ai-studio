@@ -47,7 +47,8 @@ class MainActivity : ComponentActivity() {
         context = applicationContext,
         student = st,
         liveClasses = repository.liveClasses.value,
-        batches = repository.batches.value
+        batches = repository.batches.value,
+        courses = repository.courses.value
       )
     }
 
@@ -64,8 +65,9 @@ class MainActivity : ComponentActivity() {
 
           val liveClasses by repository.liveClasses.collectAsState()
           val batches by repository.batches.collectAsState()
+          val courses by repository.courses.collectAsState()
 
-          LaunchedEffect(currentStudent, liveClasses, batches) {
+          LaunchedEffect(currentStudent, liveClasses, batches, courses) {
             val st = currentStudent
             if (st != null) {
               // Notify once if there is a new scheduled or postponed class
@@ -73,19 +75,18 @@ class MainActivity : ComponentActivity() {
                 context = applicationContext,
                 student = st,
                 liveClasses = liveClasses,
-                batches = batches
+                batches = batches,
+                courses = courses
               )
 
               // Automatically maintain 30-min alarms for student's explicitly scheduled classes
               liveClasses.forEach { session ->
-                val sessBatch = session.batchId?.trim() ?: ""
-                val sessCourse = session.courseId?.trim() ?: ""
-                val isRelevant = when {
-                  sessBatch.isNotEmpty() && !sessBatch.equals("all", ignoreCase = true) -> sessBatch == st.batchId
-                  sessBatch.equals("all", ignoreCase = true) -> sessCourse.isEmpty() || sessCourse == st.courseId
-                  sessCourse.isNotEmpty() -> sessCourse == st.courseId
-                  else -> true
-                }
+                val isRelevant = com.example.util.BatchScheduleHelper.isClassSessionForStudent(
+                  session = session,
+                  student = st,
+                  courses = courses,
+                  batches = batches
+                )
                 if (isRelevant) {
                   if (session.isPostponed || session.status.equals("postponed", ignoreCase = true)) {
                     com.example.util.InAppAlarmScheduler.cancelClassAlarm(applicationContext, session.id)

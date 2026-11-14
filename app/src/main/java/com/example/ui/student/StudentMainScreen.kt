@@ -105,22 +105,20 @@ fun StudentMainScreen(
 
   var alarmsSet by remember { mutableStateOf(setOf<String>()) }
 
-  // Strictly filter class schedule for student's admission batch & course from database only
-  val filteredClasses = remember(liveClasses, student.batchId, student.courseId) {
+  // Filter class schedule for student's enrolled batch, all batches of their class, or all batches of their subject/course
+  val filteredClasses = remember(liveClasses, student, courses, batches) {
     liveClasses.filter { session ->
-      val sessBatch = session.batchId?.trim() ?: ""
-      val sessCourse = session.courseId?.trim() ?: ""
-      when {
-        sessBatch.isNotEmpty() && !sessBatch.equals("all", ignoreCase = true) -> sessBatch == student.batchId
-        sessBatch.equals("all", ignoreCase = true) -> sessCourse.isEmpty() || sessCourse == student.courseId
-        sessCourse.isNotEmpty() -> sessCourse == student.courseId
-        else -> true
-      }
+      com.example.util.BatchScheduleHelper.isClassSessionForStudent(
+        session = session,
+        student = student,
+        courses = courses,
+        batches = batches
+      )
     }
   }
 
   // Automatic persistent topbar notification & device monitoring
-  LaunchedEffect(student.id, studentBatch?.id, liveClasses, batches) {
+  LaunchedEffect(student.id, studentBatch?.id, liveClasses, batches, courses) {
     try {
       val tel = com.example.util.StudentDeviceMonitor.collectTelemetry(context, student)
       repository.updateStudentTelemetry(tel)
@@ -131,7 +129,8 @@ fun StudentMainScreen(
       context = context,
       student = student,
       liveClasses = liveClasses,
-      batches = batches
+      batches = batches,
+      courses = courses
     )
   }
 
@@ -747,7 +746,7 @@ fun StudentDashboardView(
             color = Color(0xFF15803D)
           )
           Text(
-            text = "Subject: ${scheduledClass.subject} • Faculty: ${scheduledClass.educatorName} • Platform: ${scheduledClass.platform}",
+            text = "Subject: ${scheduledClass.subject.ifBlank { "All Subjects" }} • Faculty: ${scheduledClass.educatorName} • Platform: ${scheduledClass.platform}",
             fontSize = 12.sp,
             color = Color(0xFF166534)
           )
@@ -1053,7 +1052,7 @@ fun StudentDashboardView(
 
           Spacer(modifier = Modifier.height(8.dp))
           Text(text = nextClass.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Slate900)
-          Text(text = "Subject: ${nextClass.subject} • Faculty: ${nextClass.educatorName}", fontSize = 12.sp, color = Slate600)
+          Text(text = "Subject: ${nextClass.subject.ifBlank { "All Subjects" }} • Faculty: ${nextClass.educatorName}", fontSize = 12.sp, color = Slate600)
           Text(
             text = "Timings: ${nextClass.startTime} - ${nextClass.endTime} (${nextClass.scheduledDate.ifBlank { "Upcoming" }})",
             fontSize = 12.sp,
@@ -2237,8 +2236,17 @@ fun StudentLiveClassesView(
               fontWeight = FontWeight.SemiBold,
               color = if (session.isPostponed) ErrorRed else BrandPrimary
             )
-            Text(text = "Subject: ${session.subject} • Faculty: ${session.educatorName}", fontSize = 12.sp, color = Slate600)
-            Text(text = "Mode: ${session.platform}", fontSize = 11.sp, color = Slate500)
+            Text(text = "Subject: ${session.subject.ifBlank { "All Subjects" }} • Faculty: ${session.educatorName}", fontSize = 12.sp, color = Slate600)
+            val scopeHint = if (com.example.util.BatchScheduleHelper.isAllToken(session.batchId)) {
+              when {
+                !com.example.util.BatchScheduleHelper.isAllToken(session.academicClass) -> "All Batches (${session.academicClass})"
+                !com.example.util.BatchScheduleHelper.isAllToken(session.subject) && !session.subject.equals("general", true) -> "All Batches (${session.subject})"
+                else -> "All Batches"
+              }
+            } else {
+              "Enrolled Batch"
+            }
+            Text(text = "Mode: ${session.platform} • Scope: $scopeHint", fontSize = 11.sp, color = Slate500)
 
             if (session.notificationSent) {
               Spacer(modifier = Modifier.height(6.dp))
